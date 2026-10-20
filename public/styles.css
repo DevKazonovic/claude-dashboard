@@ -2950,6 +2950,10 @@ button.bar {
   flex-basis: 100%;
 }
 
+.agent-actions.column > .disclosure-body {
+  justify-self: stretch;
+}
+
 .phase {
   display: grid;
   gap: 4px;
@@ -2970,7 +2974,8 @@ button.bar {
 }
 
 .phase-agent {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 68px 100px;
   align-items: center;
   gap: 10px;
   padding: 5px 8px;
@@ -2979,20 +2984,23 @@ button.bar {
   text-decoration: none;
 }
 
+.phase-agent > .badge {
+  justify-self: start;
+}
+
 .phase-agent:hover {
   background: var(--hover);
 }
 
 .phase-name {
-  flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .phase-tokens {
-  flex: none;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  text-align: end;
 }
 
 .chat-marker {
