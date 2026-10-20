@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 const { start } = require('../src/server')
-const background = require('../src/background')
+const commands = require('../src/commands')
 const { version } = require('../package.json')
 
-const COMMANDS = ['start', 'stop', 'status']
+const COMMANDS = ['start', 'stop', 'status', 'update']
 
 const HELP = `Usage: claude-dashboard [command] [options]
 
@@ -15,6 +15,7 @@ Commands:
   start                  Run in the background, so you can close the terminal.
   stop                   Stop the dashboard.
   status                 Show whether the dashboard is running, and where.
+  update                 Install the newest version from GitHub.
 
 Options:
   -p, --port <number>    Port to listen on (default 3737)
@@ -67,7 +68,7 @@ if (options.error) {
   process.exit(1)
 }
 
-const run = options.command ? background[options.command] : start
+const run = options.command ? commands[options.command] : start
 
 run(options).catch((error) => {
   console.error(error.message)

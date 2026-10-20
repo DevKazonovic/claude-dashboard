@@ -111,6 +111,10 @@ function createTerminal({ stream = process.stdout, input = process.stdin, versio
     note(text) {
       print(tty ? dim(text) : text)
     },
+    spin(text) {
+      if (tty) startLive((spin) => `${accent(spin)} ${text}`)
+      else print(text)
+    },
     clear() {
       stopLive()
     },

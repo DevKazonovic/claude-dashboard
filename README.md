@@ -15,21 +15,31 @@ See what is running right now, what every agent is doing, and how many tokens ev
 
 </div>
 
-## Quick start
+## Install
 
 ```sh
-npx -y github:DevKazonovic/claude-dashboard
+npm install -g github:DevKazonovic/claude-dashboard
 ```
 
-That is the whole install, on macOS, Linux and Windows. The dashboard opens <http://127.0.0.1:3737> in your browser and runs until you press `q` or close the terminal. You only need [Node.js](https://nodejs.org) 18 or newer, which includes `npx`, and [Git](https://git-scm.com). Each run picks up the newest version.
+You need [Node.js](https://nodejs.org) 18 or newer and [Git](https://git-scm.com). It works on macOS, Linux and Windows.
 
-### Run it in the background
+## Usage
+
+```sh
+claude-dashboard
+```
+
+The dashboard opens <http://127.0.0.1:3737> in your browser and runs until you press `q` or close the terminal.
 
 | Command | What it does |
 | --- | --- |
-| `npx -y github:DevKazonovic/claude-dashboard start` | Runs it in the background, so it keeps running after you close the terminal. |
-| `npx -y github:DevKazonovic/claude-dashboard status` | Shows whether it is running, and where. |
-| `npx -y github:DevKazonovic/claude-dashboard stop` | Stops it. |
+| `claude-dashboard` | Runs it in this terminal. |
+| `claude-dashboard start` | Runs it in the background, so it keeps running after you close the terminal. |
+| `claude-dashboard status` | Shows whether it is running, and where. |
+| `claude-dashboard stop` | Stops it. |
+| `claude-dashboard update` | Installs the newest version from GitHub. |
+
+To uninstall it, run `npm uninstall -g claude-dashboard`. To try it once without installing anything, run `npx -y github:DevKazonovic/claude-dashboard`.
 
 ## Features
 
@@ -56,22 +66,13 @@ Everything stays on your computer.
 
 ## Options
 
-Add options after the command, for example `npx -y github:DevKazonovic/claude-dashboard --port 4000`.
+Add options after the command, for example `claude-dashboard start --port 4000`.
 
 | Option | What it does |
 | --- | --- |
 | `--port <number>` | Use another port. The default is 3737; if it is taken, the next free one is used. |
 | `--config-dir <path>` | Also read this Claude config folder. `~/.claude` and every `~/.claude-*` folder are found automatically. Repeat it for several folders. |
 | `--no-open` | Do not open the browser. |
-
-## Keep a `claude-dashboard` command
-
-```sh
-npm install -g github:DevKazonovic/claude-dashboard
-claude-dashboard
-```
-
-Run the same install line again to update, and `npm uninstall -g claude-dashboard` to remove it. With `npx`, there is nothing to update or remove.
 
 ## How tokens are counted
 
@@ -80,6 +81,9 @@ Claude Code saves each reply from the model in the conversation's transcript, wi
 Agent transcripts do not record all of an agent's output tokens. When Claude Code has written its own usage total into a conversation, the dashboard adds the tokens the transcripts missed and shows them as "Not in the transcripts". Until Claude Code saves its next total, a running conversation with agents can show fewer tokens than it really used.
 
 ## FAQ
+
+**`npm install -g` fails with EACCES (permission denied).**
+Your Node.js was installed for the whole system, so npm cannot write its global folder. Do not use `sudo`; point npm at a folder you own, as [npm's guide](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally) explains, then install again.
 
 **Running now is empty, but Claude Code is open.**
 The dashboard finds open conversations through the small file Claude Code writes for each one in `~/.claude/sessions`. If that folder is missing or empty, update Claude Code.

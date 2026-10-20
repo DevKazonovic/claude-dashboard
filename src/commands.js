@@ -8,6 +8,8 @@ const { health, openBrowser, scanSummary, HOST } = require('./server')
 const { homePath } = require('./format')
 const { version: VERSION } = require('../package.json')
 
+const SOURCE = 'github:DevKazonovic/claude-dashboard'
+const NPM_PERMISSIONS = 'https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally'
 const BIN = path.join(__dirname, '..', 'bin', 'claude-dashboard.js')
 const STATE_DIR = path.join(os.tmpdir(), `claude-dashboard-${typeof process.getuid === 'function' ? process.getuid() : os.userInfo().username}`)
 const STATE_FILE = path.join(STATE_DIR, 'state.json')
@@ -38,11 +40,40 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function installKind() {
+  if (__dirname.includes(`${path.sep}_npx${path.sep}`)) return 'npx'
+  if (__dirname.includes(`${path.sep}node_modules${path.sep}`)) return 'global'
+  return 'clone'
+}
+
 function commandName() {
-  const script = process.argv[1] || ''
-  if (script.includes(`${path.sep}_npx${path.sep}`)) return 'npx -y github:DevKazonovic/claude-dashboard'
-  if (script.includes(`${path.sep}node_modules${path.sep}`)) return 'claude-dashboard'
+  const kind = installKind()
+  if (kind === 'npx') return `npx -y ${SOURCE}`
+  if (kind === 'global') return 'claude-dashboard'
   return `node ${path.relative(process.cwd(), BIN) || BIN}`
+}
+
+function npm(args) {
+  return new Promise((resolve) => {
+    const child = spawn('npm', args, { shell: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+    let output = ''
+    child.stdout.on('data', (chunk) => {
+      output += chunk
+    })
+    child.stderr.on('data', (chunk) => {
+      output += chunk
+    })
+    child.on('error', (error) => resolve({ ok: false, output: error.message }))
+    child.on('close', (code) => resolve({ ok: code === 0, output }))
+  })
+}
+
+function installedVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version
+  } catch {
+    return null
+  }
 }
 
 async function findRunning(port) {
@@ -160,4 +191,25 @@ async function status(options) {
   if (running.background) ui.note(`Log: ${LOG_FILE}`)
 }
 
-module.exports = { start, stop, status }
+async function update(options) {
+  const ui = createTerminal({ version: VERSION })
+  const kind = installKind()
+  if (kind === 'npx') return ui.note('npx already runs the newest version each time, so there is nothing to update.')
+  if (kind === 'clone') return ui.note('This copy runs from a cloned folder. Update it with git pull in that folder.')
+  ui.spin('Installing the newest version from GitHub')
+  const result = await npm(['install', '-g', SOURCE])
+  ui.clear()
+  if (!result.ok) {
+    ui.log('The update failed.', 'error')
+    const tail = result.output.trim().split('\n').slice(-6).join('\n')
+    if (tail) ui.note(tail)
+    if (result.output.includes('EACCES')) ui.note(`npm cannot write to its global folder. Do not use sudo; follow ${NPM_PERMISSIONS}`)
+    process.exitCode = 1
+    return
+  }
+  ui.done(`Installed the newest version from GitHub (claude-dashboard ${installedVersion() || VERSION})`)
+  const running = await findRunning(options.port)
+  if (running && running.background) ui.note('The dashboard in the background still runs the old version. Restart it with claude-dashboard stop, then claude-dashboard start.')
+}
+
+module.exports = { start, stop, status, update }
