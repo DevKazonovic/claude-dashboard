@@ -142,7 +142,10 @@ function createHandler(collector, timelines, runs, accounts, port, report) {
         if (url.pathname === '/api/send') return sendJson(res, 200, await sendMessage(collector, runs, body))
         return sendJson(res, 200, stopMessage(runs, body))
       }
-      if (url.pathname === '/api/health') return sendJson(res, 200, { app: APP_ID, scan: scanDto(collector.scanStatus()) })
+      if (url.pathname === '/api/health') {
+        const scan = collector.scanStatus()
+        return sendJson(res, 200, { app: APP_ID, pid: process.pid, scan: scanDto(scan), counts: scan.status === 'done' ? await collector.counts() : null })
+      }
       if (url.pathname === '/api/live') return sendJson(res, 200, await buildLive(collector, accounts))
       if (url.pathname === '/api/sessions') return sendJson(res, 200, await buildHistory(collector, params))
       if (url.pathname === '/api/overview') return sendJson(res, 200, await buildOverview(collector, params))
@@ -207,7 +210,7 @@ function listen(server, port) {
   })
 }
 
-function isDashboard(port) {
+function health(port) {
   return new Promise((resolve) => {
     const req = http.get({ host: HOST, port, path: '/api/health', headers: { host: `${HOST}:${port}` }, timeout: 1500 }, (res) => {
       let body = ''
@@ -217,17 +220,33 @@ function isDashboard(port) {
       })
       res.on('end', () => {
         try {
-          resolve(JSON.parse(body).app === APP_ID)
+          const info = JSON.parse(body)
+          resolve(info && info.app === APP_ID ? info : null)
         } catch {
-          resolve(false)
+          resolve(null)
         }
       })
     })
     req.on('timeout', () => {
       req.destroy()
-      resolve(false)
+      resolve(null)
     })
-    req.on('error', () => resolve(false))
+    req.on('error', () => resolve(null))
+  })
+}
+
+function scanSummary(scan, counts, elapsed) {
+  return `Read ${format.plural(counts.conversations, 'conversation', 'conversations')} and ${format.plural(counts.agents, 'agent', 'agents')} (${format.bytes(scan.totalBytes)}) in ${format.duration(elapsed)}`
+}
+
+function saveState(file, port, url) {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify({ pid: process.pid, port, url, startedAt: Date.now() }))
+  process.on('exit', () => {
+    try {
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'))
+      if (saved.pid === process.pid) fs.rmSync(file, { force: true })
+    } catch {}
   })
 }
 
@@ -253,7 +272,7 @@ async function start(options) {
   await collector.init()
   for (let port = options.port; port < options.port + PORT_ATTEMPTS; port++) {
     const url = `http://${HOST}:${port}/`
-    if (await isDashboard(port)) {
+    if (await health(port)) {
       ui.already(url)
       if (options.open) openBrowser(url, ui)
       return
@@ -265,6 +284,7 @@ async function start(options) {
       if (error.code === 'EADDRINUSE') continue
       throw error
     }
+    if (options.stateFile) saveState(options.stateFile, port, url)
     ui.header({ url, folders: collector.configDirs().map(homePath) })
     if (port !== options.port) ui.log(`Port ${options.port} is in use, so the dashboard runs on port ${port}`, 'warning')
     collector.startFullScan()
@@ -272,8 +292,7 @@ async function start(options) {
       () => collector.scanStatus(),
       async (scan, elapsed) => {
         if (scan.status === 'failed') return ui.log(`Reading the transcripts failed: ${scan.error}`, 'error')
-        const { conversations, agents } = await collector.counts()
-        ui.done(`Read ${format.plural(conversations, 'conversation', 'conversations')} and ${format.plural(agents, 'agent', 'agents')} (${format.bytes(scan.totalBytes)}) in ${format.duration(elapsed)}`)
+        ui.done(scanSummary(scan, await collector.counts(), elapsed))
       },
     )
     if (options.open) openBrowser(url, ui)
@@ -289,4 +308,4 @@ async function start(options) {
   throw new Error(`Ports ${options.port} to ${options.port + PORT_ATTEMPTS - 1} are all in use. Pick another one with --port.`)
 }
 
-module.exports = { start }
+module.exports = { start, health, openBrowser, scanSummary, HOST }

@@ -21,7 +21,15 @@ See what is running right now, what every agent is doing, and how many tokens ev
 npx -y github:DevKazonovic/claude-dashboard
 ```
 
-That is the whole install, on macOS, Linux and Windows. The dashboard opens <http://127.0.0.1:3737> in your browser; press Ctrl+C to stop it. You only need [Node.js](https://nodejs.org) 18 or newer, which includes `npx`, and [Git](https://git-scm.com). Each run picks up the newest version.
+That is the whole install, on macOS, Linux and Windows. The dashboard opens <http://127.0.0.1:3737> in your browser and runs until you press `q` or close the terminal. You only need [Node.js](https://nodejs.org) 18 or newer, which includes `npx`, and [Git](https://git-scm.com). Each run picks up the newest version.
+
+### Run it in the background
+
+| Command | What it does |
+| --- | --- |
+| `npx -y github:DevKazonovic/claude-dashboard start` | Runs it in the background, so it keeps running after you close the terminal. |
+| `npx -y github:DevKazonovic/claude-dashboard status` | Shows whether it is running, and where. |
+| `npx -y github:DevKazonovic/claude-dashboard stop` | Stops it. |
 
 ## Features
 

@@ -269,7 +269,7 @@ function scanDto(scan) {
       : scan.status === 'failed'
         ? `Reading the transcripts failed: ${scan.error}`
         : `Reading your Claude Code transcripts, ${percent}% done. This happens once each time the dashboard starts.`
-  return { status: scan.status, percent, label }
+  return { status: scan.status, percent, label, error: scan.error, doneBytes: scan.doneBytes, totalBytes: scan.totalBytes }
 }
 
 async function scanState(collector) {

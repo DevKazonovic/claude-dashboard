@@ -87,14 +87,14 @@ function createTerminal({ stream = process.stdout, input = process.stdin, versio
   process.on('exit', showCursor)
 
   return {
-    header({ url, folders }) {
+    header({ url, folders, stopHint }) {
       const address = url.replace(/\/$/, '')
       const reading = folders.length ? `Reading ${folders.join(', ')}` : 'No Claude Code folder found yet. Start it with --config-dir <path> to add one.'
       if (!tty) {
         print(`claude-dashboard ${version}`)
         print(`Claude dashboard is running at ${url}`)
         print(reading)
-        print('Press Ctrl+C to stop.')
+        print(stopHint || 'Press Ctrl+C to stop.')
         return
       }
       print()
@@ -104,9 +104,15 @@ function createTerminal({ stream = process.stdout, input = process.stdin, versio
         `  ${bold(address)}`,
         `  ${folders.length ? dim(reading) : yellow(reading)}`,
         '',
-        `  ${dim('Press')} o ${dim('to open it in your browser,')} q ${dim('to quit')}`,
+        `  ${stopHint ? dim(stopHint) : `${dim('Press')} o ${dim('to open it in your browser,')} q ${dim('to quit')}`}`,
       ])
       print()
+    },
+    note(text) {
+      print(tty ? dim(text) : text)
+    },
+    clear() {
+      stopLive()
     },
     already(url) {
       if (!tty) return print(`Claude dashboard is already running at ${url}`)

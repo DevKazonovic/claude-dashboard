@@ -1,11 +1,20 @@
 #!/usr/bin/env node
 const { start } = require('../src/server')
+const background = require('../src/background')
 const { version } = require('../package.json')
 
-const HELP = `Usage: claude-dashboard [options]
+const COMMANDS = ['start', 'stop', 'status']
+
+const HELP = `Usage: claude-dashboard [command] [options]
 
 Opens a local web page with every Claude Code session on this computer,
 the agents inside each one, and their token usage.
+
+Commands:
+  (none)                 Run in this terminal. Closing it stops the dashboard.
+  start                  Run in the background, so you can close the terminal.
+  stop                   Stop the dashboard.
+  status                 Show whether the dashboard is running, and where.
 
 Options:
   -p, --port <number>    Port to listen on (default 3737)
@@ -17,7 +26,7 @@ Options:
   -h, --help             Show this help`
 
 function parseArgs(argv) {
-  const options = { port: 3737, open: true, configDirs: [], help: false, version: false, error: null }
+  const options = { command: null, port: 3737, open: true, configDirs: [], stateFile: null, help: false, version: false, error: null }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '-h' || arg === '--help') options.help = true
@@ -31,7 +40,9 @@ function parseArgs(argv) {
       else options.configDirs.push(value)
     }
     else if (arg.startsWith('--config-dir=')) options.configDirs.push(arg.slice('--config-dir='.length))
-    else options.error = `Unknown option: ${arg}`
+    else if (arg === '--state-file' && argv[i + 1]) options.stateFile = argv[++i]
+    else if (!arg.startsWith('-') && !options.command && COMMANDS.includes(arg)) options.command = arg
+    else options.error = arg.startsWith('-') ? `Unknown option: ${arg}` : `Unknown command: ${arg}`
   }
   if (!options.error && (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535)) {
     options.error = 'The port must be a whole number between 1 and 65535.'
@@ -56,7 +67,9 @@ if (options.error) {
   process.exit(1)
 }
 
-start(options).catch((error) => {
+const run = options.command ? background[options.command] : start
+
+run(options).catch((error) => {
   console.error(error.message)
   process.exit(1)
 })
