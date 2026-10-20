@@ -1,0 +1,40 @@
+{
+  "name": "claude-dashboard",
+  "version": "1.0.0",
+  "description": "Local web page that shows every Claude Code session on this computer, the agents inside each one, and how many tokens they used.",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "dashboard",
+    "tokens",
+    "usage",
+    "agents"
+  ],
+  "homepage": "https://github.com/DevKazonovic/claude-dashboard#readme",
+  "bugs": {
+    "url": "https://github.com/DevKazonovic/claude-dashboard/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DevKazonovic/claude-dashboard.git"
+  },
+  "author": "DevKazonovic",
+  "bin": {
+    "claude-dashboard": "bin/claude-dashboard.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node bin/claude-dashboard.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "private": true,
+  "license": "MIT"
+}

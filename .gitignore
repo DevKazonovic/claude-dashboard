@@ -1,0 +1,15 @@
+node_modules/
+.local/
+*.log
+*.tgz
+.env
+.env.*
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+CLAUDE.local.md
+.claude/settings.local.json
+KNOWN_ISSUES.md
