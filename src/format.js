@@ -90,6 +90,14 @@ function percent(share) {
   return `${Math.round(share * 100)}%`
 }
 
+function bytes(value) {
+  const size = value || 0
+  if (size >= 1e9) return `${(size / 1e9).toFixed(1)} GB`
+  if (size >= 1e6) return `${Math.round(size / 1e6)} MB`
+  if (size >= 1e3) return `${Math.round(size / 1e3)} KB`
+  return `${size} B`
+}
+
 function homePath(value) {
   if (!value) return ''
   const home = os.homedir()
@@ -132,6 +140,7 @@ module.exports = {
   duration,
   percent,
   ago,
+  bytes,
   homePath,
   whereLabel,
   sessionStatusLabel,

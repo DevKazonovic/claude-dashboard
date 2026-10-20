@@ -8,8 +8,11 @@ const { createRuns } = require('./runs')
 const { createAccounts } = require('./accounts')
 const { buildLive, buildHistory, buildOverview, buildProjects, buildRecents, scanDto } = require('./views')
 const { buildConversation, buildAgent, buildChat, buildTurn, sendMessage, stopMessage, RequestError } = require('./conversation')
-const { homePath } = require('./format')
+const format = require('./format')
+const { createTerminal } = require('./terminal')
+const { version: VERSION } = require('../package.json')
 
+const { homePath } = format
 const APP_ID = 'claude-dashboard'
 const HOST = '127.0.0.1'
 const PORT_ATTEMPTS = 20
@@ -122,7 +125,7 @@ function sendJson(res, status, data) {
   send(res, status, JSON.stringify(data), 'application/json; charset=utf-8')
 }
 
-function createHandler(collector, timelines, runs, accounts, port) {
+function createHandler(collector, timelines, runs, accounts, port, report) {
   const allowedHosts = new Set([`${HOST}:${port}`, `localhost:${port}`, `[::1]:${port}`])
   return async (req, res) => {
     if (!allowedHosts.has(req.headers.host)) return send(res, 403, 'Forbidden', 'text/plain; charset=utf-8')
@@ -182,7 +185,7 @@ function createHandler(collector, timelines, runs, accounts, port) {
       return send(res, 404, 'Not found', 'text/plain; charset=utf-8')
     } catch (error) {
       if (error instanceof RequestError) return sendJson(res, error.status, { error: error.message })
-      console.error(error)
+      report(`${req.method} ${url.pathname} failed: ${error.message || error}`)
       return sendJson(res, 500, { error: error.message || 'Something went wrong on the dashboard server.' })
     }
   }
@@ -228,7 +231,7 @@ function isDashboard(port) {
   })
 }
 
-function openBrowser(url) {
+function openBrowser(url, ui) {
   const [command, args] =
     process.platform === 'darwin'
       ? ['open', [url]]
@@ -236,36 +239,51 @@ function openBrowser(url) {
         ? ['cmd', ['/c', 'start', '', url]]
         : ['xdg-open', [url]]
   const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true })
-  child.on('error', () => console.log(`Could not open a browser. Open ${url} yourself.`))
+  child.on('spawn', () => ui.log('Opened the dashboard in your browser'))
+  child.on('error', () => ui.log(`Could not open a browser. Open ${url} yourself.`, 'warning'))
   child.unref()
 }
 
 async function start(options) {
+  const ui = createTerminal({ version: VERSION })
   const collector = createCollector({ extraConfigDirs: options.configDirs })
   const timelines = createTimelines()
-  const runs = createRuns()
+  const runs = createRuns((text, tone) => ui.log(text, tone))
   const accounts = createAccounts(collector)
   await collector.init()
   for (let port = options.port; port < options.port + PORT_ATTEMPTS; port++) {
     const url = `http://${HOST}:${port}/`
     if (await isDashboard(port)) {
-      console.log(`Claude dashboard is already running at ${url}`)
-      if (options.open) openBrowser(url)
+      ui.already(url)
+      if (options.open) openBrowser(url, ui)
       return
     }
-    const server = http.createServer(createHandler(collector, timelines, runs, accounts, port))
+    const server = http.createServer(createHandler(collector, timelines, runs, accounts, port, (text) => ui.log(text, 'error')))
     try {
       await listen(server, port)
     } catch (error) {
       if (error.code === 'EADDRINUSE') continue
       throw error
     }
-    const dirs = collector.configDirs()
-    console.log(`Claude dashboard is running at ${url}`)
-    console.log(dirs.length ? `Reading ${dirs.map(homePath).join(', ')}` : 'No Claude Code folder found yet. Use --config-dir <path> to add one.')
-    console.log('Press Ctrl+C to stop.')
+    ui.header({ url, folders: collector.configDirs().map(homePath) })
+    if (port !== options.port) ui.log(`Port ${options.port} is in use, so the dashboard runs on port ${port}`, 'warning')
     collector.startFullScan()
-    if (options.open) openBrowser(url)
+    ui.watchScan(
+      () => collector.scanStatus(),
+      async (scan, elapsed) => {
+        if (scan.status === 'failed') return ui.log(`Reading the transcripts failed: ${scan.error}`, 'error')
+        const { conversations, agents } = await collector.counts()
+        ui.done(`Read ${format.plural(conversations, 'conversation', 'conversations')} and ${format.plural(agents, 'agent', 'agents')} (${format.bytes(scan.totalBytes)}) in ${format.duration(elapsed)}`)
+      },
+    )
+    if (options.open) openBrowser(url, ui)
+    const quit = () => {
+      ui.stop()
+      process.exit(0)
+    }
+    ui.keys({ open: () => openBrowser(url, ui), quit })
+    process.once('SIGINT', quit)
+    process.once('SIGTERM', quit)
     return
   }
   throw new Error(`Ports ${options.port} to ${options.port + PORT_ATTEMPTS - 1} are all in use. Pick another one with --port.`)

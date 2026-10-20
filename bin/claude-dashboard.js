@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const { start } = require('../src/server')
+const { version } = require('../package.json')
 
 const HELP = `Usage: claude-dashboard [options]
 
@@ -12,13 +13,15 @@ Options:
                          several folders. ~/.claude and ~/.claude-* are
                          found automatically.
   --no-open              Do not open the browser
+  -v, --version          Show the version
   -h, --help             Show this help`
 
 function parseArgs(argv) {
-  const options = { port: 3737, open: true, configDirs: [], help: false, error: null }
+  const options = { port: 3737, open: true, configDirs: [], help: false, version: false, error: null }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '-h' || arg === '--help') options.help = true
+    else if (arg === '-v' || arg === '--version') options.version = true
     else if (arg === '--no-open') options.open = false
     else if (arg === '-p' || arg === '--port') options.port = Number(argv[++i])
     else if (arg.startsWith('--port=')) options.port = Number(arg.slice('--port='.length))
@@ -40,6 +43,11 @@ const options = parseArgs(process.argv.slice(2))
 
 if (options.help) {
   console.log(HELP)
+  process.exit(0)
+}
+
+if (options.version) {
+  console.log(version)
   process.exit(0)
 }
 

@@ -22,7 +22,7 @@ function lastLines(text, count) {
   return text.trim().split('\n').filter(Boolean).slice(-count).join(' ')
 }
 
-function createRuns() {
+function createRuns(log = () => {}) {
   const runs = new Map()
 
   function view(run) {
@@ -35,6 +35,9 @@ function createRuns() {
     run.error = error || null
     run.endedAt = Date.now()
     run.child = null
+    if (status === 'done') log(`Claude Code finished the reply in conversation ${run.id.slice(0, 8)}`, 'success')
+    else if (status === 'stopped') log(`Stopped the reply in conversation ${run.id.slice(0, 8)}`)
+    else log(`The reply in conversation ${run.id.slice(0, 8)} failed: ${run.error}`, 'error')
   }
 
   return {
@@ -47,8 +50,9 @@ function createRuns() {
       return Boolean(run && run.status === 'running')
     },
     start(id, cwd, message) {
-      const run = { status: 'running', startedAt: Date.now(), endedAt: null, error: null, out: '', err: '', stopped: false, child: null }
+      const run = { id, status: 'running', startedAt: Date.now(), endedAt: null, error: null, out: '', err: '', stopped: false, child: null }
       runs.set(id, run)
+      log(`Sending your message to conversation ${id.slice(0, 8)} with claude --resume`)
       if (!fs.existsSync(cwd)) {
         finish(run, 'failed', `The folder ${cwd} no longer exists, so this conversation cannot be resumed.`)
         return view(run)

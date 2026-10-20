@@ -646,6 +646,15 @@ function createCollector(options = {}) {
     startFullScan,
     configDirs: () => configDirs.slice(),
     scanStatus: () => ({ ...scan }),
+    async counts() {
+      let conversations = 0
+      let agents = 0
+      for (const entry of (await getIndex()).values()) {
+        if (entry.main) conversations += 1
+        agents += entry.agents.length
+      }
+      return { conversations, agents }
+    },
     async live() {
       const records = await liveRecords()
       const sessions = await getIndex()

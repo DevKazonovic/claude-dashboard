@@ -18,7 +18,7 @@ See what is running right now, what every agent is doing, and how many tokens ev
 ## Quick start
 
 ```sh
-npx github:DevKazonovic/claude-dashboard
+npx -y github:DevKazonovic/claude-dashboard
 ```
 
 That is the whole install, on macOS, Linux and Windows. The dashboard opens <http://127.0.0.1:3737> in your browser; press Ctrl+C to stop it. You only need [Node.js](https://nodejs.org) 18 or newer, which includes `npx`, and [Git](https://git-scm.com). Each run picks up the newest version.
@@ -48,7 +48,7 @@ Everything stays on your computer.
 
 ## Options
 
-Add options after the command, for example `npx github:DevKazonovic/claude-dashboard --port 4000`.
+Add options after the command, for example `npx -y github:DevKazonovic/claude-dashboard --port 4000`.
 
 | Option | What it does |
 | --- | --- |
