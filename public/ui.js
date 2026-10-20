@@ -216,7 +216,7 @@ export async function getJson(url) {
   try {
     response = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } })
   } catch {
-    throw new Error('The dashboard server is not reachable. Start it again with ./run.sh, or run.cmd on Windows, in the claude-dashboard folder.')
+    throw new Error('The dashboard server is not reachable. Start it again from your terminal.')
   }
   let body = null
   try {
@@ -233,7 +233,7 @@ export async function postJson(url, data) {
   try {
     response = await fetch(url, { method: 'POST', cache: 'no-store', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
   } catch {
-    throw new Error('The dashboard server is not reachable. Start it again with ./run.sh, or run.cmd on Windows, in the claude-dashboard folder.')
+    throw new Error('The dashboard server is not reachable. Start it again from your terminal.')
   }
   let body = null
   try {

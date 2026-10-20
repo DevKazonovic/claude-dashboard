@@ -18,14 +18,10 @@ See what is running right now, what every agent is doing, and how many tokens ev
 ## Quick start
 
 ```sh
-git clone https://github.com/DevKazonovic/claude-dashboard.git
-cd claude-dashboard
-./run.sh
+npx github:DevKazonovic/claude-dashboard
 ```
 
-On Windows, run `.\run.cmd` instead of `./run.sh`.
-
-The dashboard opens <http://127.0.0.1:3737> in your browser. It needs [Node.js](https://nodejs.org) 18 or newer, and nothing else: there are no dependencies to install. Press Ctrl+C to stop it.
+That is the whole install, on macOS, Linux and Windows. The dashboard opens <http://127.0.0.1:3737> in your browser; press Ctrl+C to stop it. You only need [Node.js](https://nodejs.org) 18 or newer, which includes `npx`, and [Git](https://git-scm.com). Each run picks up the newest version.
 
 ## Features
 
@@ -52,7 +48,7 @@ Everything stays on your computer.
 
 ## Options
 
-Pass options after the start command, for example `./run.sh --port 4000`.
+Add options after the command, for example `npx github:DevKazonovic/claude-dashboard --port 4000`.
 
 | Option | What it does |
 | --- | --- |
@@ -60,17 +56,14 @@ Pass options after the start command, for example `./run.sh --port 4000`.
 | `--config-dir <path>` | Also read this Claude config folder. `~/.claude` and every `~/.claude-*` folder are found automatically. Repeat it for several folders. |
 | `--no-open` | Do not open the browser. |
 
-Other ways to start it:
+## Keep a `claude-dashboard` command
 
-| Command | What it does |
-| --- | --- |
-| `npm start` | Same as `./run.sh`. |
-| `npm install -g .` | Installs the `claude-dashboard` command, so you can start it from any folder. |
-| `make local` | Runs it in the background with a progress bar (macOS and Linux, needs `curl` and `lsof`). `make stop`, `make status` and `make logs` manage it. |
+```sh
+npm install -g github:DevKazonovic/claude-dashboard
+claude-dashboard
+```
 
-## Update and uninstall
-
-To update, run `git pull` in the folder and start it again. To uninstall, delete the folder, and run `npm uninstall -g claude-dashboard` if you installed the command.
+Run the same install line again to update, and `npm uninstall -g claude-dashboard` to remove it. With `npx`, there is nothing to update or remove.
 
 ## How tokens are counted
 
@@ -94,7 +87,7 @@ Nowhere new. The dashboard keeps what it reads in memory, and the browser only r
 
 ## Contributing
 
-Issues and pull requests are welcome. There is no build step: the server is in `src/`, the page is in `public/`, and both are plain JavaScript. Change a file, restart with `./run.sh`, and refresh the page.
+Issues and pull requests are welcome. There is no build step: the server is in `src/`, the page is in `public/`, and both are plain JavaScript. Clone the repo, run `npm start` in it, change a file, restart and refresh the page.
 
 ## License
 
