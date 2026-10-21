@@ -48,7 +48,7 @@ To uninstall it, run `npm uninstall -g claude-dashboard`. To try it once without
 - **Search.** Find a conversation by its title, its folder, or anything you wrote in it.
 - **Agents and workflows.** Subagents and workflow agents show as cards in the chat. Open one to read its whole run in a side panel, live while it works.
 - **Tokens.** Tokens per day, week or month, split into input, output, cache write and cache read, per model, conversation, project and reply.
-- **Usage limits.** The session and weekly limits of every Claude account signed in to Claude Code on your computer.
+- **Usage limits.** The session and weekly limits of every Claude account signed in to Claude Code on your computer. Refresh asks Claude Code to check them again.
 - **Reply from the page.** Send a message to a finished conversation without opening a terminal.
 - **Open in VS Code or a terminal.** Resume a finished conversation in a Claude Code tab in VS Code, or in a new terminal window, with one click.
 - Light and dark mode, and a shareable address for every page.
@@ -62,7 +62,7 @@ To uninstall it, run `npm uninstall -g claude-dashboard`. To try it once without
 Everything stays on your computer.
 
 - It reads the files Claude Code saves in `~/.claude` and `~/.claude-*`, and never changes them.
-- It never reads your Claude login and never contacts Anthropic or any other server. Usage limits come from the copy Claude Code saves in `.claude.json`.
+- It never reads your Claude login and never contacts Anthropic or any other server itself. Usage limits come from the copy Claude Code saves in `.claude.json`. The Refresh button runs `claude -p /usage` for that account, so Claude Code checks with its own login and saves the new numbers. It doesn't send a prompt, so it doesn't use up your limits.
 - It only listens on `127.0.0.1`, so other devices on your network cannot open it.
 - It only acts when you click: the reply box runs `claude --resume <id> --print` in that conversation's folder, and the Open buttons start VS Code or a terminal with `claude --resume <id>`, all with your own Claude Code settings and permissions.
 

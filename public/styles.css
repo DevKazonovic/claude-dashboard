@@ -1764,9 +1764,20 @@ button.bar {
   color: var(--muted);
 }
 
-.usage-strip-checked {
+.usage-strip-check {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
   margin-inline-start: auto;
+}
+
+.usage-strip-checked {
   color: var(--faint);
+}
+
+.usage-error-line {
+  color: var(--red);
+  font-size: 12.5px;
 }
 
 .is-stale {

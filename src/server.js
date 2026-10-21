@@ -51,7 +51,7 @@ const HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 }
-const POST_ROUTES = new Set(['/api/send', '/api/stop', '/api/open'])
+const POST_ROUTES = new Set(['/api/send', '/api/stop', '/api/open', '/api/accounts/refresh'])
 const BODY_LIMIT = 256 * 1024
 
 function readBody(req) {
@@ -141,6 +141,14 @@ function createHandler(collector, timelines, runs, accounts, port, report) {
         if (!body) return sendJson(res, 400, { error: 'The request body is not valid JSON.' })
         if (url.pathname === '/api/send') return sendJson(res, 200, await sendMessage(collector, runs, body))
         if (url.pathname === '/api/open') return sendJson(res, 200, await openConversation(collector, runs, body))
+        if (url.pathname === '/api/accounts/refresh') {
+          if (typeof body.key !== 'string' || !body.key) return sendJson(res, 400, { error: 'Choose an account to refresh.' })
+          try {
+            return sendJson(res, 200, await accounts.refresh(body.key))
+          } catch (error) {
+            return sendJson(res, error.status || 500, { error: error.message })
+          }
+        }
         return sendJson(res, 200, stopMessage(runs, body))
       }
       if (url.pathname === '/api/health') {

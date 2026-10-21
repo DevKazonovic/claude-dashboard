@@ -1,9 +1,13 @@
 const os = require('os')
 const path = require('path')
+const { spawn } = require('child_process')
 const format = require('./format')
 const { createJsonCache, realpathSafe } = require('./collector')
 
 const STALE_MS = 60 * 60 * 1000
+const REFRESH_GAP_MS = 60 * 1000
+const SAVE_GAP_MS = 5 * 60 * 1000
+const REFRESH_TIMEOUT_MS = 30 * 1000
 const DAY_MS = 24 * 60 * 60 * 1000
 const GROUP_TITLES = { session: null, weekly: 'Weekly limits' }
 
@@ -72,13 +76,45 @@ function usageDto(entry, now) {
     checkedLabel: fetchedAt && sameAccount ? `Claude Code checked these ${format.ago(fetchedAt, now)}.` : 'Claude Code has not saved usage limits for this account yet.',
     checkedShort: fetchedAt && sameAccount ? `Checked ${format.ago(fetchedAt, now)}` : 'Not checked yet',
     stale: Boolean(fetchedAt && sameAccount && now - fetchedAt > STALE_MS),
-    staleNote: fetchedAt && sameAccount && now - fetchedAt > STALE_MS ? 'Open Claude Code with this account to refresh them.' : null,
+    staleNote: fetchedAt && sameAccount && now - fetchedAt > STALE_MS ? 'These numbers are over an hour old. Refresh to check again.' : null,
   }
+}
+
+function runUsageCheck(configDir, isDefault) {
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env }
+    if (isDefault) delete env.CLAUDE_CONFIG_DIR
+    else env.CLAUDE_CONFIG_DIR = configDir
+    let child
+    try {
+      child = spawn('claude', ['-p', '/usage'], { cwd: os.tmpdir(), env, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
+    } catch (error) {
+      reject(error)
+      return
+    }
+    let errors = ''
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk) => {
+      errors = `${errors}${chunk}`.slice(-2000)
+    })
+    const timer = setTimeout(() => child.kill('SIGKILL'), REFRESH_TIMEOUT_MS)
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.on('close', (code, signal) => {
+      clearTimeout(timer)
+      if (code === 0) return resolve()
+      const last = errors.trim().split('\n').filter((line) => line && !line.startsWith('Permission allow rule')).slice(-2).join(' ')
+      reject(new Error(signal ? 'Claude Code took too long to check the usage.' : last || `Claude Code stopped with exit code ${code}.`))
+    })
+  })
 }
 
 function createAccounts(collector) {
   const readJson = createJsonCache()
   const home = os.homedir()
+  const refreshes = new Map()
 
   async function load() {
     await collector.init()
@@ -139,6 +175,31 @@ function createAccounts(collector) {
     async list() {
       const now = Date.now()
       return { generatedAt: now, accounts: (await load()).map((entry) => usageDto(entry, now)) }
+    },
+    async refresh(key) {
+      const entries = await load()
+      const entry = entries.find((item) => str(item.account.accountUuid) === key)
+      if (!entry) throw Object.assign(new Error('This account is not signed in to Claude Code on this computer.'), { status: 404 })
+      const last = refreshes.get(key)
+      const savedAt = entry.usage && Number.isFinite(entry.usage.fetchedAtMs) && entry.usage.accountUuid === key ? entry.usage.fetchedAtMs : 0
+      const wait = SAVE_GAP_MS - (Date.now() - savedAt)
+      if (last && last.pending) await last.pending
+      else if (wait > 0) throw Object.assign(new Error(`These numbers are under 5 minutes old, and Claude Code only saves a new check after that. Refresh again in ${format.duration(wait)}.`), { status: 429 })
+      else if (last && Date.now() - last.at < REFRESH_GAP_MS) throw Object.assign(new Error('The usage was checked less than a minute ago. Try again in a moment.'), { status: 429 })
+      else {
+        const defaultDir = await realpathSafe(path.join(home, '.claude'))
+        const pending = runUsageCheck(entry.configDir, entry.realDir === defaultDir)
+        refreshes.set(key, { at: Date.now(), pending })
+        try {
+          await pending
+        } catch (error) {
+          refreshes.set(key, { at: Date.now(), pending: null })
+          if (error.code === 'ENOENT') throw Object.assign(new Error('Could not find the claude command, which checks the usage.'), { status: 500 })
+          throw Object.assign(new Error(`Claude Code could not check the usage: ${error.message}`), { status: 502 })
+        }
+        refreshes.set(key, { at: Date.now(), pending: null })
+      }
+      return this.list()
     },
     async forSession(item) {
       const entries = await load()
