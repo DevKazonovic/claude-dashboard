@@ -92,8 +92,8 @@ function disclosure({ label, open, onToggle, className, focusKey, content }) {
   return [trigger, body]
 }
 
-function clampable(content, { long, key, openSet, invert, className }) {
-  const isOpen = () => Boolean(invert) !== openSet.has(key)
+function clampable(content, { long, key, openSet, className }) {
+  const isOpen = () => openSet.has(key)
   const box = el('div', { class: `${className}${long && !isOpen() ? ' is-clamped' : ''}` }, content)
   if (!long) return box
   const more = el(
@@ -153,8 +153,8 @@ function createConversation(container, target, initialParams, options = {}) {
     sending: false,
     sendError: null,
     followNext: false,
-    ui: { text: new Set(), inputs: new Set(), agents: new Set(), markers: new Set(), calls: new Set(), panels: new Set(), prompts: new Set() },
-    promptMode: null,
+    ui: { text: new Set(), inputs: new Set(), agents: new Set(), markers: new Set(), calls: new Set(), panels: new Set(), replies: new Set() },
+    repliesCollapsed: false,
     opening: null,
   }
   const nodes = new Map()
@@ -389,25 +389,32 @@ function createConversation(container, target, initialParams, options = {}) {
   }
 
   function toggleFoldAll() {
-    state.promptMode = state.promptMode === 'folded' ? 'expanded' : 'folded'
-    state.ui.text.clear()
-    state.ui.prompts.clear()
+    state.repliesCollapsed = !state.repliesCollapsed
+    state.ui.replies.clear()
     rerenderTurns([...nodes.keys()])
     renderOpener()
   }
 
-  function unfoldPrompt(index, key) {
-    state.ui.prompts.add(key)
-    rerenderTurns([index])
-    const next = list.querySelector(`[data-focus="${CSS.escape(`more-${key}`)}"]`)
+  function replyHidden(turn) {
+    return state.repliesCollapsed && !state.ui.replies.has(turn.index)
+  }
+
+  function toggleReply(turn) {
+    toggleSet(state.ui.replies, turn.index)
+    rerenderTurns([turn.index])
+    const next = list.querySelector(`[data-focus="${CSS.escape(`reply-${turn.index}`)}"]`)
     if (next) next.focus({ preventScroll: true })
   }
 
-  function promptBubble(turn, prompt, key) {
-    if (state.promptMode === 'folded' && !state.ui.prompts.has(key)) {
-      return el('button', { class: 'bubble prompt-folded', type: 'button', 'data-focus': `fold-${key}`, 'aria-expanded': 'false', title: 'Show the whole message', onclick: () => unfoldPrompt(turn.index, key) }, prompt.text)
-    }
-    return clampable(el('span', null, prompt.text), { long: prompt.long, key, openSet: state.ui.text, invert: state.promptMode === 'expanded', className: 'bubble' })
+  function replyToggle(turn) {
+    const hidden = replyHidden(turn)
+    return el(
+      'button',
+      { class: 'disclosure small-toggle reply-toggle', type: 'button', 'aria-expanded': String(!hidden), 'data-focus': `reply-${turn.index}`, onclick: () => toggleReply(turn) },
+      icon('chevron', 'disclosure-chevron'),
+      el('span', null, hidden ? 'Show response' : 'Hide response'),
+      hidden && turn.footLabel ? el('span', { class: 'reply-toggle-meta' }, `· ${turn.footLabel}`) : null,
+    )
   }
 
   async function openIn(where) {
@@ -435,8 +442,8 @@ function createConversation(container, target, initialParams, options = {}) {
     if (!foldButton) return
     const ready = state.status === 'ready'
     foldButton.hidden = !ready
-    foldButton.textContent = state.promptMode === 'folded' ? 'Expand prompts' : 'Collapse prompts'
-    foldButton.setAttribute('aria-pressed', String(state.promptMode === 'folded'))
+    foldButton.textContent = state.repliesCollapsed ? 'Expand responses' : 'Collapse responses'
+    foldButton.setAttribute('aria-pressed', String(state.repliesCollapsed))
     const opener = ready ? state.data.opener : null
     for (const [button, where, label] of [[vscodeButton, 'vscode', 'Open in VS Code'], [terminalButton, 'terminal', 'Open in Terminal']]) {
       button.hidden = !opener
@@ -1078,6 +1085,9 @@ function createConversation(container, target, initialParams, options = {}) {
     const selected = state.selected === turn.index
     const group = el('article', { class: `msg-group msg-${turn.kind}${selected ? ' is-selected' : ''}`, id: `turn-${turn.index}`, 'aria-label': `Message ${turn.number}` })
     group.append(senderView(turn))
+    const hasReply = turn.segments.length > 0 || Boolean(turn.emptyLabel) || Boolean(turn.footLabel)
+    if (state.repliesCollapsed && hasReply) group.append(replyToggle(turn))
+    if (replyHidden(turn) && hasReply) return group
     if (turn.segments.length) group.append(el('div', { class: 'msg-claude' }, turn.segments.map((segment) => segmentView(turn, segment))))
     else if (turn.emptyLabel && !(isWorking() && turn.index === summaries().length - 1)) group.append(el('p', { class: 'msg-empty' }, turn.emptyLabel))
     if (turn.footLabel && embedded) group.append(el('p', { class: 'msg-foot is-static' }, turn.footLabel))
@@ -1131,7 +1141,7 @@ function createConversation(container, target, initialParams, options = {}) {
       'div',
       { class: 'msg-user' },
       el('p', { class: 'msg-meta' }, joinMeta([turn.kind === 'prompt' ? null : turn.kindLabel, turn.atLabel])),
-      prompt.text ? promptBubble(turn, prompt, key) : null,
+      prompt.text ? clampable(el('span', null, prompt.text), { long: prompt.long, key, openSet: state.ui.text, className: 'bubble' }) : null,
       prompt.attachmentsLabel ? el('p', { class: 'note' }, `Attached: ${prompt.attachmentsLabel}`) : null,
       prompt.requestLabel ? el('p', { class: 'note' }, prompt.requestLabel) : null,
       prompt.truncatedNote ? el('p', { class: 'note' }, prompt.truncatedNote) : null,

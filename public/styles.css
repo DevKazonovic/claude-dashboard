@@ -2241,24 +2241,13 @@ button.bar {
   justify-items: stretch;
 }
 
-.msg-user .prompt-folded {
-  display: block;
-  color: inherit;
-  font: inherit;
-  text-align: start;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
+.reply-toggle {
+  justify-self: start;
 }
 
-.msg-user .prompt-folded:hover {
-  border-color: var(--faint);
-}
-
-.msg-user .prompt-folded:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.reply-toggle-meta {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
 }
 
 .msg-user .show-more {
