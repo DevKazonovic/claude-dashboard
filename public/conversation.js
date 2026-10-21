@@ -35,6 +35,7 @@ const MAX_RANGE = 50
 const FOLLOW_SLACK = 160
 const INPUT_MAX_HEIGHT = 200
 const OPEN_NOTE_MS = 5000
+const OPEN_NOTE_LONG_MS = 30000
 
 export function conversationPage(container, params) {
   return createConversation(container, { id: params.get('session'), agent: null }, params)
@@ -152,8 +153,8 @@ function createConversation(container, target, initialParams, options = {}) {
     sending: false,
     sendError: null,
     followNext: false,
-    ui: { text: new Set(), inputs: new Set(), agents: new Set(), markers: new Set(), calls: new Set(), panels: new Set() },
-    foldOpen: false,
+    ui: { text: new Set(), inputs: new Set(), agents: new Set(), markers: new Set(), calls: new Set(), panels: new Set(), prompts: new Set() },
+    promptMode: null,
     opening: null,
   }
   const nodes = new Map()
@@ -379,12 +380,34 @@ function createConversation(container, target, initialParams, options = {}) {
     agentReturnFocus = null
   }
 
+  function rerenderTurns(indexes) {
+    for (const index of indexes) {
+      const entry = nodes.get(index)
+      if (entry) entry.turn = null
+      renderTurn(index)
+    }
+  }
+
   function toggleFoldAll() {
-    state.foldOpen = !state.foldOpen
+    state.promptMode = state.promptMode === 'folded' ? 'expanded' : 'folded'
     state.ui.text.clear()
-    for (const entry of nodes.values()) entry.turn = null
-    for (const index of [...nodes.keys()]) renderTurn(index)
+    state.ui.prompts.clear()
+    rerenderTurns([...nodes.keys()])
     renderOpener()
+  }
+
+  function unfoldPrompt(index, key) {
+    state.ui.prompts.add(key)
+    rerenderTurns([index])
+    const next = list.querySelector(`[data-focus="${CSS.escape(`more-${key}`)}"]`)
+    if (next) next.focus({ preventScroll: true })
+  }
+
+  function promptBubble(turn, prompt, key) {
+    if (state.promptMode === 'folded' && !state.ui.prompts.has(key)) {
+      return el('button', { class: 'bubble prompt-folded', type: 'button', 'data-focus': `fold-${key}`, 'aria-expanded': 'false', title: 'Show the whole message', onclick: () => unfoldPrompt(turn.index, key) }, prompt.text)
+    }
+    return clampable(el('span', null, prompt.text), { long: prompt.long, key, openSet: state.ui.text, invert: state.promptMode === 'expanded', className: 'bubble' })
   }
 
   async function openIn(where) {
@@ -392,7 +415,7 @@ function createConversation(container, target, initialParams, options = {}) {
     renderOpener()
     try {
       const result = await postJson('/api/open', { id: target.id, target: where })
-      showOpenNote(result.message, false)
+      showOpenNote(result.message, false, result.sticky)
     } catch (error) {
       showOpenNote(error.message, true)
     }
@@ -400,20 +423,20 @@ function createConversation(container, target, initialParams, options = {}) {
     renderOpener()
   }
 
-  function showOpenNote(text, failed) {
+  function showOpenNote(text, failed, sticky) {
     window.clearTimeout(openNoteTimer)
     openNote.textContent = text
     openNote.classList.toggle('is-error', failed)
     openNote.hidden = false
-    if (!failed) openNoteTimer = window.setTimeout(() => (openNote.hidden = true), OPEN_NOTE_MS)
+    if (!failed) openNoteTimer = window.setTimeout(() => (openNote.hidden = true), sticky ? OPEN_NOTE_LONG_MS : OPEN_NOTE_MS)
   }
 
   function renderOpener() {
     if (!foldButton) return
     const ready = state.status === 'ready'
     foldButton.hidden = !ready
-    foldButton.textContent = state.foldOpen ? 'Collapse all' : 'Expand all'
-    foldButton.setAttribute('aria-pressed', String(state.foldOpen))
+    foldButton.textContent = state.promptMode === 'folded' ? 'Expand prompts' : 'Collapse prompts'
+    foldButton.setAttribute('aria-pressed', String(state.promptMode === 'folded'))
     const opener = ready ? state.data.opener : null
     for (const [button, where, label] of [[vscodeButton, 'vscode', 'Open in VS Code'], [terminalButton, 'terminal', 'Open in Terminal']]) {
       button.hidden = !opener
@@ -1101,14 +1124,14 @@ function createConversation(container, target, initialParams, options = {}) {
         'div',
         { class: 'msg-event' },
         el('p', { class: 'msg-meta' }, joinMeta([turn.kindLabel, turn.atLabel])),
-        el('div', { class: 'event-box' }, clampable(renderMarkdown(prompt.text), { long: prompt.long, key, openSet: state.ui.text, invert: state.foldOpen, className: 'md small-md' }), prompt.truncatedNote ? el('p', { class: 'note' }, prompt.truncatedNote) : null),
+        el('div', { class: 'event-box' }, clampable(renderMarkdown(prompt.text), { long: prompt.long, key, openSet: state.ui.text, className: 'md small-md' }), prompt.truncatedNote ? el('p', { class: 'note' }, prompt.truncatedNote) : null),
       )
     }
     return el(
       'div',
       { class: 'msg-user' },
       el('p', { class: 'msg-meta' }, joinMeta([turn.kind === 'prompt' ? null : turn.kindLabel, turn.atLabel])),
-      prompt.text ? clampable(el('span', null, prompt.text), { long: prompt.long, key, openSet: state.ui.text, invert: state.foldOpen, className: 'bubble' }) : null,
+      prompt.text ? promptBubble(turn, prompt, key) : null,
       prompt.attachmentsLabel ? el('p', { class: 'note' }, `Attached: ${prompt.attachmentsLabel}`) : null,
       prompt.requestLabel ? el('p', { class: 'note' }, prompt.requestLabel) : null,
       prompt.truncatedNote ? el('p', { class: 'note' }, prompt.truncatedNote) : null,
@@ -1122,7 +1145,7 @@ function createConversation(container, target, initialParams, options = {}) {
       tone = segment.kind === 'error' || segment.kind === 'hook' ? 'error' : segment.kind === 'interrupted' || segment.kind === 'notice' ? 'warning' : 'muted'
       content = markerView(segment)
     } else if (segment.type === 'text') {
-      content = [clampable(renderMarkdown(segment.text), { long: segment.long, key: segment.key, openSet: state.ui.text, invert: state.foldOpen, className: 'md' }), segment.truncatedNote ? el('p', { class: 'note' }, segment.truncatedNote) : null]
+      content = [clampable(renderMarkdown(segment.text), { long: segment.long, key: segment.key, openSet: state.ui.text, className: 'md' }), segment.truncatedNote ? el('p', { class: 'note' }, segment.truncatedNote) : null]
     } else if (segment.type === 'activity') {
       tone = segment.status
       content = activityView(turn, segment)
@@ -1198,8 +1221,8 @@ function createConversation(container, target, initialParams, options = {}) {
   function markerView(marker) {
     const key = `marker-${marker.kind}-${marker.atLabel}-${marker.label}`
     const node = el('div', { class: `chat-marker marker-${marker.kind}` }, el('p', { class: 'marker-line' }, el('span', { class: 'marker-label' }, marker.label), marker.statusLabel ? badge('neutral', marker.statusLabel) : null, el('span', { class: 'marker-when' }, marker.atLabel)))
-    if (marker.text && marker.kind === 'queued') node.append(clampable(el('span', null, marker.text), { long: marker.long, key, openSet: state.ui.text, invert: state.foldOpen, className: 'bubble' }))
-    else if (marker.text && marker.kind === 'peer') node.append(clampable(renderMarkdown(marker.text), { long: marker.long, key, openSet: state.ui.text, invert: state.foldOpen, className: 'md small-md' }))
+    if (marker.text && marker.kind === 'queued') node.append(clampable(el('span', null, marker.text), { long: marker.long, key, openSet: state.ui.text, className: 'bubble' }))
+    else if (marker.text && marker.kind === 'peer') node.append(clampable(renderMarkdown(marker.text), { long: marker.long, key, openSet: state.ui.text, className: 'md small-md' }))
     else if (marker.text) node.append(el('p', { class: 'marker-text' }, marker.text))
     if (marker.detail) node.append(el('div', { class: 'marker-detail' }, disclosure({ label: marker.detailLabel, open: state.ui.markers.has(key), onToggle: () => toggleSet(state.ui.markers, key), focusKey: `detail-${key}`, className: 'small-toggle', content: () => el('div', { class: 'md small-md' }, renderMarkdown(marker.detail)) })))
     return node

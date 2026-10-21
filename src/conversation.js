@@ -553,7 +553,7 @@ async function openConversation(collector, runs, body) {
   try {
     if (target === 'vscode') {
       await openVscode(session.cwd, id)
-      return { message: 'Opened the conversation in VS Code.' }
+      return { message: 'Sent the conversation to VS Code. If VS Code asks whether Claude Code may open this link, choose Open, and tick the box so it stops asking.', sticky: true }
     }
     const app = await openTerminal(resumeCommand(session.cwd, id))
     return { message: `Opened the conversation in ${app}.` }

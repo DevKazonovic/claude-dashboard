@@ -44,7 +44,7 @@ To uninstall it, run `npm uninstall -g claude-dashboard`. To try it once without
 ## Features
 
 - **Running now.** Every open Claude Code conversation on your computer, grouped by project, with the Claude account it runs on. A live line shows what each conversation and agent is doing, such as `Bash Run the tests · 52 s`.
-- **Chat view.** Read any conversation the way the Claude Code panel in VS Code shows it. Thinking and tool calls fold into one line; open it to see every model call, its tokens, and each tool's input and output. Expand all opens every long message at once.
+- **Chat view.** Read any conversation the way the Claude Code panel in VS Code shows it. Thinking and tool calls fold into one line; open it to see every model call, its tokens, and each tool's input and output. Collapse prompts folds every message you sent to one line, so you can scan the conversation.
 - **Search.** Find a conversation by its title, its folder, or anything you wrote in it.
 - **Agents and workflows.** Subagents and workflow agents show as cards in the chat. Open one to read its whole run in a side panel, live while it works.
 - **Tokens.** Tokens per day, week or month, split into input, output, cache write and cache read, per model, conversation, project and reply.
@@ -95,6 +95,9 @@ The dashboard needs to see which Claude Code processes are running, and the repl
 
 **The reply box says the claude command was not found on Windows.**
 Replying from the page starts `claude.exe`, which comes with Claude Code's native installer. If you installed Claude Code with npm, reply in Claude Code itself.
+
+**Open in VS Code does nothing.**
+VS Code asks "Allow 'Claude Code' extension to open this URI?" before it lets the extension open the conversation, and that dialog can sit behind your browser. Switch to VS Code, choose Open, and tick the box so it stops asking. You can also add `"extensions.confirmedUriHandlerExtensionIds": ["anthropic.claude-code"]` to your VS Code settings.
 
 **Where is my data stored?**
 Nowhere new. The dashboard keeps what it reads in memory, and the browser only remembers your theme and which project groups you opened.

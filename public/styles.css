@@ -2241,6 +2241,26 @@ button.bar {
   justify-items: stretch;
 }
 
+.msg-user .prompt-folded {
+  display: block;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.msg-user .prompt-folded:hover {
+  border-color: var(--faint);
+}
+
+.msg-user .prompt-folded:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .msg-user .show-more {
   justify-self: start;
 }
