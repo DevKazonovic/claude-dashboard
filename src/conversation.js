@@ -2,6 +2,7 @@ const crypto = require('crypto')
 const fs = require('fs')
 const format = require('./format')
 const { describeSession, agentGroups, modelRows, modelsOf, sumModels, tokenRows, resumeCommand, liveActivity } = require('./views')
+const { openTerminal, openVscode } = require('./launch')
 
 const SESSION_ID = /^[A-Za-z0-9_-]{6,100}$/
 const AGENT_ID = /^[A-Za-z0-9_-]{1,100}$/
@@ -532,6 +533,36 @@ async function sendMessage(collector, runs, body) {
   return { run: runs.start(id, session.cwd, message) }
 }
 
+function openerOf(session, item, run) {
+  if (item.record) return { available: false, note: 'This conversation is already open in Claude Code.' }
+  if (run && run.status === 'running') return { available: false, note: 'Claude is answering your message from the dashboard.' }
+  if (!session.cwd || !item.loaded.main) return { available: false, note: 'This conversation has no folder on record, so it cannot be resumed.' }
+  return { available: true, note: null }
+}
+
+async function openConversation(collector, runs, body) {
+  const id = requestId(body)
+  const target = body.target
+  if (target !== 'terminal' && target !== 'vscode') throw new RequestError(400, 'Choose where to open the conversation: terminal or vscode.')
+  const item = await loadSession(collector, id)
+  if (!item) throw new RequestError(404, 'This conversation was not found on this computer.')
+  const session = describeSession(item, { range: null, now: Date.now() })
+  const opener = openerOf(session, item, runs.get(id))
+  if (!opener.available) throw new RequestError(409, opener.note)
+  if (!(await isFolder(session.cwd))) throw new RequestError(409, `The folder ${format.homePath(session.cwd)} no longer exists, so this conversation cannot be resumed.`)
+  try {
+    if (target === 'vscode') {
+      await openVscode(session.cwd, id)
+      return { message: 'Opened the conversation in VS Code.' }
+    }
+    const app = await openTerminal(resumeCommand(session.cwd, id))
+    return { message: `Opened the conversation in ${app}.` }
+  } catch (error) {
+    if (target === 'vscode' && error.code === 'ENOENT') throw new RequestError(500, 'Could not find VS Code. Install it, or open the conversation in a terminal.')
+    throw new RequestError(500, `Could not open the conversation: ${error.message}`)
+  }
+}
+
 function stopMessage(runs, body) {
   const id = requestId(body)
   if (!runs.stop(id)) throw new RequestError(409, 'Claude is not answering a message from the dashboard right now.')
@@ -569,6 +600,7 @@ async function buildConversation(collector, timelines, runs, accounts, params) {
     timeline: timeline ? timelineView(timeline, links, now) : null,
     timelineMissing: timeline ? null : 'This conversation has no main transcript on this computer, only agent transcripts.',
     composer: composerOf(session, item, run),
+    opener: openerOf(session, item, run),
     account: await accounts.forSession(item),
   }
 }
@@ -642,4 +674,4 @@ async function buildTurn(collector, timelines, params) {
   return chatTurn(chat.timeline, chat.timeline.turns[index], chat.summaries[index], chat.links, chat.now)
 }
 
-module.exports = { buildConversation, buildAgent, buildChat, buildTurn, sendMessage, stopMessage, RequestError }
+module.exports = { buildConversation, buildAgent, buildChat, buildTurn, sendMessage, stopMessage, openConversation, RequestError }

@@ -366,8 +366,10 @@ async function buildLive(collector, accounts) {
   }
 }
 
-function matchesSearch(dto, search) {
-  return [dto.title, dto.projectLabel, dto.project, dto.id, dto.name || ''].some((value) => value.toLowerCase().includes(search))
+function matchesSearch(session, search) {
+  const dto = session.dto
+  if ([dto.title, dto.projectLabel, dto.project, dto.id, dto.name || ''].some((value) => value.toLowerCase().includes(search))) return true
+  return Boolean(session.loaded.main && session.loaded.main.data.promptText.includes(search))
 }
 
 async function buildHistory(collector, params) {
@@ -383,7 +385,7 @@ async function buildHistory(collector, params) {
   const described = await describeAll(collector, range, now)
   const inRange = inRangeOf(described, range)
   const scoped = project ? inRange.filter((session) => session.dto.project === project) : inRange
-  const matches = search ? scoped.filter((session) => matchesSearch(session.dto, search)) : scoped
+  const matches = search ? scoped.filter((session) => matchesSearch(session, search)) : scoped
   const value = (session) => (sort === 'tokens' ? session.dto.totalTokens : sort === 'started' ? session.dto.startedAt || 0 : session.dto.lastActiveAt || 0)
   matches.sort((a, b) => (dir === 'asc' ? value(a) - value(b) : value(b) - value(a)) || (b.dto.lastActiveAt || 0) - (a.dto.lastActiveAt || 0))
   const total = matches.length
@@ -637,7 +639,7 @@ async function buildRecents(collector, params) {
   const search = (params.get('q') || '').trim().toLowerCase()
   const open = params.get('session') || ''
   const usable = (await describeAll(collector, null, now)).filter((session) => session.everUsed || session.dto.live)
-  const matches = search ? usable.filter((session) => matchesSearch(session.dto, search)) : usable
+  const matches = search ? usable.filter((session) => matchesSearch(session, search)) : usable
   const names = uniqueNames(usable)
   const byProject = new Map()
   for (const session of matches) {

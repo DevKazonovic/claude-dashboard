@@ -20,6 +20,9 @@ const USER_LINE = '"type":"user"'
 const META_FLAG = '"isMeta":true'
 const SIDECHAIN_FLAG = '"isSidechain":true'
 const TURN_ENDS = new Set(['end_turn', 'stop_sequence'])
+const PROMPT_CLIP = 2000
+const PROMPT_TEXT_LIMIT = 60000
+const PROMPT_LINE_LIMIT = 200000
 const FINAL_TOOL = 'StructuredOutput'
 const ERROR_FLAG = '"is_error":true'
 const INTERRUPTED_TEXT = '[Request interrupted by user'
@@ -127,6 +130,7 @@ function freshData() {
     turnEnded: false,
     turnEndedAt: null,
     interrupted: false,
+    promptText: '',
     taskStatus: new Map(),
     taskStatusById: new Map(),
     workflowTasks: new Map(),
@@ -241,6 +245,16 @@ function handleCostState(data, line) {
   }
 }
 
+function readPrompt(data, line) {
+  const record = parseJson(line)
+  if (!record || record.type !== 'user' || !record.message) return
+  const content = record.message.content
+  const text = typeof content === 'string' ? content : Array.isArray(content) ? content.filter((block) => block && block.type === 'text' && typeof block.text === 'string').map((block) => block.text).join('\n') : ''
+  const trimmed = text.trim()
+  if (!trimmed || trimmed.startsWith('<')) return
+  data.promptText = own(`${data.promptText}\n${trimmed.slice(0, PROMPT_CLIP).toLowerCase()}`.slice(0, PROMPT_TEXT_LIMIT))
+}
+
 function handleMeta(data, line) {
   const record = parseJson(line)
   if (!record) return
@@ -272,6 +286,7 @@ function handleLine(transcript, line) {
   }
   if (line.length < SMALL_LINE && line.includes(INTERRUPTED_TEXT)) data.interrupted = true
   if (transcript.kind === 'main') {
+    if (data.promptText.length < PROMPT_TEXT_LIMIT && line.length < PROMPT_LINE_LIMIT && line.includes(USER_LINE) && !line.includes('"tool_use_id":"') && !line.includes(META_FLAG) && !line.includes(SIDECHAIN_FLAG)) readPrompt(data, line)
     if (line.includes(NOTIFICATION_OPEN)) readNotifications(data, line)
     if (line.includes('Run ID: wf_')) {
       for (const match of line.matchAll(WORKFLOW_RUN)) data.workflowTasks.set(own(match[2]), own(match[1]))

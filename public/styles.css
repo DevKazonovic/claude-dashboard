@@ -1707,9 +1707,19 @@ button.bar {
 .chat-bar-actions {
   position: relative;
   display: flex;
-  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
+}
+
+.open-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.open-note.is-error {
+  color: var(--red);
 }
 
 .account-note {
@@ -3385,6 +3395,18 @@ button.bar {
   .details-button {
     display: inline-flex;
     flex: none;
+  }
+
+  .chat-bar {
+    flex-wrap: wrap;
+  }
+
+  .chat-crumbs {
+    flex-basis: 100%;
+  }
+
+  .chat-bar-actions {
+    justify-content: flex-start;
   }
 
   .side {

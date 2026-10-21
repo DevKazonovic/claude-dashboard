@@ -7,7 +7,7 @@ const { createTimelines } = require('./timeline')
 const { createRuns } = require('./runs')
 const { createAccounts } = require('./accounts')
 const { buildLive, buildHistory, buildOverview, buildProjects, buildRecents, scanDto } = require('./views')
-const { buildConversation, buildAgent, buildChat, buildTurn, sendMessage, stopMessage, RequestError } = require('./conversation')
+const { buildConversation, buildAgent, buildChat, buildTurn, sendMessage, stopMessage, openConversation, RequestError } = require('./conversation')
 const format = require('./format')
 const { createTerminal } = require('./terminal')
 const { version: VERSION } = require('../package.json')
@@ -51,7 +51,7 @@ const HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 }
-const POST_ROUTES = new Set(['/api/send', '/api/stop'])
+const POST_ROUTES = new Set(['/api/send', '/api/stop', '/api/open'])
 const BODY_LIMIT = 256 * 1024
 
 function readBody(req) {
@@ -140,6 +140,7 @@ function createHandler(collector, timelines, runs, accounts, port, report) {
         const body = parseBody(await readBody(req))
         if (!body) return sendJson(res, 400, { error: 'The request body is not valid JSON.' })
         if (url.pathname === '/api/send') return sendJson(res, 200, await sendMessage(collector, runs, body))
+        if (url.pathname === '/api/open') return sendJson(res, 200, await openConversation(collector, runs, body))
         return sendJson(res, 200, stopMessage(runs, body))
       }
       if (url.pathname === '/api/health') {

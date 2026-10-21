@@ -44,11 +44,13 @@ To uninstall it, run `npm uninstall -g claude-dashboard`. To try it once without
 ## Features
 
 - **Running now.** Every open Claude Code conversation on your computer, grouped by project, with the Claude account it runs on. A live line shows what each conversation and agent is doing, such as `Bash Run the tests · 52 s`.
-- **Chat view.** Read any conversation the way the Claude Code panel in VS Code shows it. Thinking and tool calls fold into one line; open it to see every model call, its tokens, and each tool's input and output.
+- **Chat view.** Read any conversation the way the Claude Code panel in VS Code shows it. Thinking and tool calls fold into one line; open it to see every model call, its tokens, and each tool's input and output. Expand all opens every long message at once.
+- **Search.** Find a conversation by its title, its folder, or anything you wrote in it.
 - **Agents and workflows.** Subagents and workflow agents show as cards in the chat. Open one to read its whole run in a side panel, live while it works.
 - **Tokens.** Tokens per day, week or month, split into input, output, cache write and cache read, per model, conversation, project and reply.
 - **Usage limits.** The session and weekly limits of every Claude account signed in to Claude Code on your computer.
 - **Reply from the page.** Send a message to a finished conversation without opening a terminal.
+- **Open in VS Code or a terminal.** Resume a finished conversation in a Claude Code tab in VS Code, or in a new terminal window, with one click.
 - Light and dark mode, and a shareable address for every page.
 
 ![A conversation with its agents, tokens and usage limits](docs/chat.png)
@@ -62,7 +64,7 @@ Everything stays on your computer.
 - It reads the files Claude Code saves in `~/.claude` and `~/.claude-*`, and never changes them.
 - It never reads your Claude login and never contacts Anthropic or any other server. Usage limits come from the copy Claude Code saves in `.claude.json`.
 - It only listens on `127.0.0.1`, so other devices on your network cannot open it.
-- The one thing that writes is the reply box: sending a message runs `claude --resume <id> --print` in that conversation's folder, with your own Claude Code settings and permissions.
+- It only acts when you click: the reply box runs `claude --resume <id> --print` in that conversation's folder, and the Open buttons start VS Code or a terminal with `claude --resume <id>`, all with your own Claude Code settings and permissions.
 
 ## Options
 

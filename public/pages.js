@@ -501,7 +501,7 @@ export function conversationsPage(container, params) {
     noun: 'conversations',
     api: '/api/sessions',
     params: ['range', 'from', 'to', 'q', 'sort', 'dir', 'page', 'project'],
-    searchLabel: 'Search by title, folder or ID',
+    searchLabel: 'Search titles, folders and your messages',
     sortLabel: 'Sort conversations',
     sorts: CONVERSATION_SORTS,
     defaultSort: 'lastActive:desc',

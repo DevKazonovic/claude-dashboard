@@ -162,7 +162,7 @@ export function createSidebar() {
           'div',
           { class: 'sidebar-note' },
           el('p', { class: 'sidebar-note-title' }, 'No conversation matches'),
-          el('p', null, `Nothing has “${query}” in its title, folder or ID.`),
+          el('p', null, `No title, folder or message of yours has “${query}”.`),
           button(
             'Clear search',
             () => {

@@ -34,6 +34,7 @@ const PAGE = 20
 const MAX_RANGE = 50
 const FOLLOW_SLACK = 160
 const INPUT_MAX_HEIGHT = 200
+const OPEN_NOTE_MS = 5000
 
 export function conversationPage(container, params) {
   return createConversation(container, { id: params.get('session'), agent: null }, params)
@@ -90,24 +91,26 @@ function disclosure({ label, open, onToggle, className, focusKey, content }) {
   return [trigger, body]
 }
 
-function clampable(content, { long, key, openSet, className }) {
-  const box = el('div', { class: `${className}${long && !openSet.has(key) ? ' is-clamped' : ''}` }, content)
+function clampable(content, { long, key, openSet, invert, className }) {
+  const isOpen = () => Boolean(invert) !== openSet.has(key)
+  const box = el('div', { class: `${className}${long && !isOpen() ? ' is-clamped' : ''}` }, content)
   if (!long) return box
   const more = el(
     'button',
     {
       class: 'show-more',
       type: 'button',
-      'aria-expanded': String(openSet.has(key)),
+      'aria-expanded': String(isOpen()),
       'data-focus': `more-${key}`,
       onclick: () => {
-        const open = toggleSet(openSet, key)
+        toggleSet(openSet, key)
+        const open = isOpen()
         box.classList.toggle('is-clamped', !open)
         more.setAttribute('aria-expanded', String(open))
         more.textContent = open ? 'Show less' : 'Show more'
       },
     },
-    openSet.has(key) ? 'Show less' : 'Show more',
+    isOpen() ? 'Show less' : 'Show more',
   )
   return el('div', { class: `clamp-wrap ${className.split(' ')[0]}-wrap` }, box, more)
 }
@@ -150,6 +153,8 @@ function createConversation(container, target, initialParams, options = {}) {
     sendError: null,
     followNext: false,
     ui: { text: new Set(), inputs: new Set(), agents: new Set(), markers: new Set(), calls: new Set(), panels: new Set() },
+    foldOpen: false,
+    opening: null,
   }
   const nodes = new Map()
   let request = 0
@@ -184,6 +189,11 @@ function createConversation(container, target, initialParams, options = {}) {
 
   let crumbsHolder = null
   let detailsButton = null
+  let foldButton = null
+  let vscodeButton = null
+  let terminalButton = null
+  let openNote = null
+  let openNoteTimer = null
   let composer = null
   let bottom = null
   let side = null
@@ -207,7 +217,12 @@ function createConversation(container, target, initialParams, options = {}) {
     sideBackdrop = el('div', { class: 'side-backdrop', hidden: true, onclick: () => closeSide(false) })
     crumbsHolder = el('div', { class: 'chat-crumbs' })
     detailsButton = el('button', { class: 'button small details-button', type: 'button', 'aria-controls': side.id, 'data-focus': 'details-button', hidden: true, onclick: () => openSide() })
-    bar.append(crumbsHolder, el('div', { class: 'chat-bar-actions' }, detailsButton))
+    foldButton = el('button', { class: 'button small ghost', type: 'button', 'data-focus': 'fold-all', hidden: true, onclick: () => toggleFoldAll() })
+    vscodeButton = el('button', { class: 'button small', type: 'button', 'data-focus': 'open-vscode', hidden: true, onclick: () => openIn('vscode') }, 'Open in VS Code')
+    terminalButton = el('button', { class: 'button small', type: 'button', 'data-focus': 'open-terminal', hidden: true, onclick: () => openIn('terminal') }, 'Open in Terminal')
+    openNote = el('p', { class: 'open-note', role: 'status', hidden: true })
+    bar.append(crumbsHolder, el('div', { class: 'chat-bar-actions' }, foldButton, vscodeButton, terminalButton, detailsButton))
+    notice.after(openNote)
     accountNote = el('p', { class: 'account-note', hidden: true })
     usageHolder = el('div', { class: 'chat-usage' })
     usageCard = el('section', { class: 'side-card usage-card', hidden: true }, el('h2', { class: 'side-card-title' }, 'Usage limits'), accountNote, usageHolder)
@@ -362,6 +377,50 @@ function createConversation(container, target, initialParams, options = {}) {
     agentView = null
     if (agentReturnFocus && document.contains(agentReturnFocus)) agentReturnFocus.focus({ preventScroll: true })
     agentReturnFocus = null
+  }
+
+  function toggleFoldAll() {
+    state.foldOpen = !state.foldOpen
+    state.ui.text.clear()
+    for (const entry of nodes.values()) entry.turn = null
+    for (const index of [...nodes.keys()]) renderTurn(index)
+    renderOpener()
+  }
+
+  async function openIn(where) {
+    state.opening = where
+    renderOpener()
+    try {
+      const result = await postJson('/api/open', { id: target.id, target: where })
+      showOpenNote(result.message, false)
+    } catch (error) {
+      showOpenNote(error.message, true)
+    }
+    state.opening = null
+    renderOpener()
+  }
+
+  function showOpenNote(text, failed) {
+    window.clearTimeout(openNoteTimer)
+    openNote.textContent = text
+    openNote.classList.toggle('is-error', failed)
+    openNote.hidden = false
+    if (!failed) openNoteTimer = window.setTimeout(() => (openNote.hidden = true), OPEN_NOTE_MS)
+  }
+
+  function renderOpener() {
+    if (!foldButton) return
+    const ready = state.status === 'ready'
+    foldButton.hidden = !ready
+    foldButton.textContent = state.foldOpen ? 'Collapse all' : 'Expand all'
+    foldButton.setAttribute('aria-pressed', String(state.foldOpen))
+    const opener = ready ? state.data.opener : null
+    for (const [button, where, label] of [[vscodeButton, 'vscode', 'Open in VS Code'], [terminalButton, 'terminal', 'Open in Terminal']]) {
+      button.hidden = !opener
+      button.disabled = !opener || !opener.available || Boolean(state.opening)
+      button.title = opener && opener.note ? opener.note : ''
+      button.textContent = state.opening === where ? 'Opening' : label
+    }
   }
 
   function drawerMode() {
@@ -826,6 +885,7 @@ function createConversation(container, target, initialParams, options = {}) {
       chatBody.hidden = true
       if (sideBody) sideBody.replaceChildren()
       if (bottom) bottom.hidden = true
+      renderOpener()
       notice.replaceChildren(
         errorBlock(isAgent ? 'Could not load this agent' : 'Could not load this conversation', state.error, () => {
           chatBody.hidden = false
@@ -852,6 +912,7 @@ function createConversation(container, target, initialParams, options = {}) {
     renderWorking()
     renderStatusNote()
     renderComposer()
+    renderOpener()
   }
 
   function renderAccount() {
@@ -1040,14 +1101,14 @@ function createConversation(container, target, initialParams, options = {}) {
         'div',
         { class: 'msg-event' },
         el('p', { class: 'msg-meta' }, joinMeta([turn.kindLabel, turn.atLabel])),
-        el('div', { class: 'event-box' }, clampable(renderMarkdown(prompt.text), { long: prompt.long, key, openSet: state.ui.text, className: 'md small-md' }), prompt.truncatedNote ? el('p', { class: 'note' }, prompt.truncatedNote) : null),
+        el('div', { class: 'event-box' }, clampable(renderMarkdown(prompt.text), { long: prompt.long, key, openSet: state.ui.text, invert: state.foldOpen, className: 'md small-md' }), prompt.truncatedNote ? el('p', { class: 'note' }, prompt.truncatedNote) : null),
       )
     }
     return el(
       'div',
       { class: 'msg-user' },
       el('p', { class: 'msg-meta' }, joinMeta([turn.kind === 'prompt' ? null : turn.kindLabel, turn.atLabel])),
-      prompt.text ? clampable(el('span', null, prompt.text), { long: prompt.long, key, openSet: state.ui.text, className: 'bubble' }) : null,
+      prompt.text ? clampable(el('span', null, prompt.text), { long: prompt.long, key, openSet: state.ui.text, invert: state.foldOpen, className: 'bubble' }) : null,
       prompt.attachmentsLabel ? el('p', { class: 'note' }, `Attached: ${prompt.attachmentsLabel}`) : null,
       prompt.requestLabel ? el('p', { class: 'note' }, prompt.requestLabel) : null,
       prompt.truncatedNote ? el('p', { class: 'note' }, prompt.truncatedNote) : null,
@@ -1061,7 +1122,7 @@ function createConversation(container, target, initialParams, options = {}) {
       tone = segment.kind === 'error' || segment.kind === 'hook' ? 'error' : segment.kind === 'interrupted' || segment.kind === 'notice' ? 'warning' : 'muted'
       content = markerView(segment)
     } else if (segment.type === 'text') {
-      content = [clampable(renderMarkdown(segment.text), { long: segment.long, key: segment.key, openSet: state.ui.text, className: 'md' }), segment.truncatedNote ? el('p', { class: 'note' }, segment.truncatedNote) : null]
+      content = [clampable(renderMarkdown(segment.text), { long: segment.long, key: segment.key, openSet: state.ui.text, invert: state.foldOpen, className: 'md' }), segment.truncatedNote ? el('p', { class: 'note' }, segment.truncatedNote) : null]
     } else if (segment.type === 'activity') {
       tone = segment.status
       content = activityView(turn, segment)
@@ -1137,8 +1198,8 @@ function createConversation(container, target, initialParams, options = {}) {
   function markerView(marker) {
     const key = `marker-${marker.kind}-${marker.atLabel}-${marker.label}`
     const node = el('div', { class: `chat-marker marker-${marker.kind}` }, el('p', { class: 'marker-line' }, el('span', { class: 'marker-label' }, marker.label), marker.statusLabel ? badge('neutral', marker.statusLabel) : null, el('span', { class: 'marker-when' }, marker.atLabel)))
-    if (marker.text && marker.kind === 'queued') node.append(clampable(el('span', null, marker.text), { long: marker.long, key, openSet: state.ui.text, className: 'bubble' }))
-    else if (marker.text && marker.kind === 'peer') node.append(clampable(renderMarkdown(marker.text), { long: marker.long, key, openSet: state.ui.text, className: 'md small-md' }))
+    if (marker.text && marker.kind === 'queued') node.append(clampable(el('span', null, marker.text), { long: marker.long, key, openSet: state.ui.text, invert: state.foldOpen, className: 'bubble' }))
+    else if (marker.text && marker.kind === 'peer') node.append(clampable(renderMarkdown(marker.text), { long: marker.long, key, openSet: state.ui.text, invert: state.foldOpen, className: 'md small-md' }))
     else if (marker.text) node.append(el('p', { class: 'marker-text' }, marker.text))
     if (marker.detail) node.append(el('div', { class: 'marker-detail' }, disclosure({ label: marker.detailLabel, open: state.ui.markers.has(key), onToggle: () => toggleSet(state.ui.markers, key), focusKey: `detail-${key}`, className: 'small-toggle', content: () => el('div', { class: 'md small-md' }, renderMarkdown(marker.detail)) })))
     return node
