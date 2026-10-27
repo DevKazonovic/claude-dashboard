@@ -24,15 +24,12 @@ import {
   pager,
   scanBlock,
   button,
-  live,
-  spinner,
-  activityText,
-  liveLine,
   THEMES,
   currentTheme,
   setTheme,
 } from './ui.js'
 import { createUsage } from './usage.js'
+import { chatLink, projectLink, openChat, openProject } from './panels.js'
 
 const REFRESH_MS = 30000
 const SEARCH_MS = 300
@@ -75,10 +72,6 @@ function apiQuery(params) {
   return search.toString()
 }
 
-function conversationHref(id) {
-  return urlFor({ session: id })
-}
-
 function tableSkeleton(columns = 5) {
   return el(
     'div',
@@ -87,7 +80,7 @@ function tableSkeleton(columns = 5) {
   )
 }
 
-function rowLink(href, focusKey, cells) {
+function rowLink(open, focusKey, cells) {
   return el(
     'tr',
     {
@@ -96,12 +89,12 @@ function rowLink(href, focusKey, cells) {
       'data-focus': focusKey,
       onclick: (event) => {
         if (event.target.closest('a')) return
-        navigate(href)
+        open()
       },
       onkeydown: (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
-          navigate(href)
+          open()
         }
       },
     },
@@ -186,8 +179,9 @@ function overviewContent(data) {
           el(
             'li',
             null,
-            link(
-              conversationHref(row.id),
+            chatLink(
+              row.id,
+              null,
               { class: 'rank-item', 'data-focus': `top-${row.id}` },
               el('span', { class: 'rank-main' }, el('span', { class: 'rank-title' }, row.title), el('span', { class: 'rank-meta' }, joinMeta([row.projectLabel, row.lastActiveLabel]))),
               el('span', { class: 'rank-value' }, row.tokensLabel),
@@ -204,8 +198,8 @@ function overviewContent(data) {
           el(
             'li',
             null,
-            link(
-              urlFor({ view: 'conversations', project: row.project, ...rangeParamsFromData(data) }),
+            projectLink(
+              row.project,
               { class: 'rank-item', 'data-focus': `project-${row.project}` },
               el('span', { class: 'rank-main' }, el('span', { class: 'rank-title' }, row.name), el('span', { class: 'rank-meta' }, joinMeta([row.label, row.conversationsLabel]))),
               el('span', { class: 'rank-value' }, row.tokensLabel),
@@ -241,13 +235,13 @@ function overviewSkeleton() {
   return [statsSkeleton(), el('section', { class: 'card' }, skeleton('line w-30'), el('div', { class: 'chart-skeleton' }, skeleton('block'))), el('div', { class: 'grid-2' }, el('section', { class: 'card' }, linesSkeleton(4)), el('section', { class: 'card' }, linesSkeleton(4)))]
 }
 
-export function overviewPage(container, params) {
+export function analyticsPage(container, params) {
   let query = params
-  setTitle('Overview')
-  const shell = pageShell(container, { title: 'Overview', intro: 'How many tokens your Claude Code conversations used.' })
+  setTitle('Analytics')
+  const shell = pageShell(container, { title: 'Analytics', intro: 'How many tokens your Claude Code conversations used.' })
   const rangeHolder = el('div', { class: 'menu' })
   shell.actions.append(rangeHolder)
-  const range = rangeMenu(rangeHolder, { onChange: (next) => navigate(urlFor({ view: 'overview', ...next })) })
+  const range = rangeMenu(rangeHolder, { onChange: (next) => navigate(urlFor({ view: 'analytics', ...next })) })
   const resource = createResource(() => `/api/overview?${apiQuery(rangeParams(query))}`, render)
   function render(state) {
     const body = shell.body
@@ -259,7 +253,7 @@ export function overviewPage(container, params) {
     range.render(query, data.range)
     if (!data.sessionsOnMachine) return body.replaceChildren(stateBlock({ title: 'No Claude Code conversations found', text: data.firstRunMessage }))
     if (!data.conversationCount) {
-      return body.replaceChildren(stateBlock({ title: 'No activity in this date range', text: `Nothing ran in ${data.range.description}.`, actions: [button('Show all time', () => navigate(urlFor({ view: 'overview' })))] }))
+      return body.replaceChildren(stateBlock({ title: 'No activity in this date range', text: `Nothing ran in ${data.range.description}.`, actions: [button('Show all time', () => navigate(urlFor({ view: 'analytics' })))] }))
     }
     keepFocus(body, () => body.replaceChildren(...[state.refreshError ? banner(`${state.refreshError} Showing the last data.`) : null, ...overviewContent(data)].filter(Boolean)))
   }
@@ -280,85 +274,6 @@ export function overviewPage(container, params) {
       range.close()
     },
   }
-}
-
-function liveCard(session) {
-  return el(
-    'article',
-    { class: 'live-card' },
-    el(
-      'div',
-      { class: 'live-row' },
-      el(
-        'div',
-        { class: 'live-main' },
-        link(conversationHref(session.id), { class: 'live-title', 'data-focus': `live-${session.id}` }, session.title),
-        el('p', { class: session.accountKnown ? 'live-account' : 'live-account is-unknown' }, session.accountLabel),
-        el('p', { class: 'meta' }, joinMeta([session.whereLabel, session.startedLabel])),
-      ),
-      el('div', { class: 'live-side' }, badge(session.status, session.statusLabel), el('span', { class: 'amount' }, session.tokensLabel)),
-    ),
-    session.activity ? liveLine(session.activity) : null,
-    el('p', { class: 'meta' }, joinMeta([session.agentsLabel, session.modelsLabel])),
-    session.workingAgentList.length ? el('ul', { class: 'working-list' }, session.workingAgentList.map((agent) => workingAgent(session, agent))) : null,
-  )
-}
-
-function workingAgent(session, agent) {
-  return el(
-    'li',
-    null,
-    link(
-      urlFor({ session: session.id, agent: agent.id }),
-      { class: 'working-agent', 'data-focus': `working-${session.id}-${agent.id}` },
-      spinner(),
-      el('span', { class: 'working-main' }, el('span', { class: 'working-head' }, el('span', { class: 'working-type' }, agent.typeLabel), el('span', { class: 'working-desc' }, agent.description)), agent.activity ? activityText(agent.activity) : null),
-      el('span', { class: 'amount small' }, agent.tokensLabel),
-    ),
-  )
-}
-
-function liveGroup(group) {
-  return el(
-    'section',
-    { class: 'live-group' },
-    el('div', { class: 'live-group-head' }, el('h2', { class: 'live-group-title' }, group.name), el('p', { class: 'live-group-meta' }, joinMeta([group.label, group.summaryLabel]))),
-    el('div', { class: 'cards' }, group.sessions.map(liveCard)),
-  )
-}
-
-export function livePage(container) {
-  setTitle('Running now')
-  const shell = pageShell(container, { title: 'Running now', intro: 'Conversations open on this computer right now, and the agents working inside them. This page updates every 3 seconds.' })
-  const summary = el('p', { class: 'page-meta', 'aria-live': 'polite' })
-  shell.actions.append(summary)
-  const unsubscribe = live.subscribe((state) => {
-    const body = shell.body
-    if (state.status === 'loading') {
-      body.replaceChildren(el('div', { class: 'cards' }, [0, 1].map(() => el('div', { class: 'live-card' }, linesSkeleton(3)))))
-      return
-    }
-    if (!state.data) {
-      summary.textContent = ''
-      body.replaceChildren(errorBlock('Could not load the running conversations', state.error, () => live.refresh && live.refresh()))
-      return
-    }
-    summary.textContent = state.status === 'stale' ? 'Reconnecting' : state.data.totals.summaryLabel
-    const parts = []
-    if (state.status === 'stale') parts.push(banner(`${state.error} Showing the last data and retrying.`))
-    if (state.data.groups.length) parts.push(el('div', { class: 'live-groups' }, state.data.groups.map(liveGroup)))
-    else {
-      parts.push(
-        stateBlock({
-          title: 'Nothing is running',
-          text: 'Start Claude Code in a terminal, VS Code or the desktop app. It shows up here within a few seconds.',
-          actions: [link(urlFor({ view: 'conversations' }), { class: 'button', 'data-focus': 'live-empty-action' }, 'See past conversations')],
-        }),
-      )
-    }
-    keepFocus(body, () => body.replaceChildren(...parts))
-  })
-  return { update() {}, destroy: unsubscribe }
 }
 
 function searchInput(placeholder, value, onSearch) {
@@ -480,8 +395,8 @@ function conversationsTable(rows) {
         'tbody',
         null,
         rows.map((row) =>
-          rowLink(conversationHref(row.id), `row-${row.id}`, [
-            el('td', null, el('div', { class: 'cell-title' }, link(conversationHref(row.id), { class: 'cell-link', tabindex: '-1' }, row.title), row.live ? badge(row.status, row.statusLabel) : null), el('div', { class: 'meta' }, row.projectLabel)),
+          rowLink(() => openChat(row.id), `row-${row.id}`, [
+            el('td', null, el('div', { class: 'cell-title' }, chatLink(row.id, null, { class: 'cell-link', tabindex: '-1' }, row.title), row.live ? badge(row.status, row.statusLabel) : null), el('div', { class: 'meta' }, row.projectLabel)),
             el('td', { class: 'meta' }, row.modelsLabel),
             el('td', { class: 'num' }, String(row.agentCount)),
             el('td', { class: 'nowrap' }, row.lastActiveLabel),
@@ -524,7 +439,7 @@ function projectsTable(rows) {
         'tbody',
         null,
         rows.map((row) =>
-          rowLink(urlFor({ view: 'conversations', project: row.project }), `project-${row.project}`, [
+          rowLink(() => openProject(row.project), `project-${row.project}`, [
             el('td', null, el('div', { class: 'cell-title' }, row.name, row.live ? badge('busy', `${row.live} running`) : null), el('div', { class: 'meta' }, row.label)),
             el('td', { class: 'num' }, String(row.conversations)),
             el('td', { class: 'num' }, String(row.agents)),
@@ -553,6 +468,129 @@ export function projectsPage(container, params) {
     summary: (data) => data.summary.line,
     chips: () => [],
     table: projectsTable,
+  })
+}
+
+function skillsTable(rows) {
+  return el(
+    'div',
+    { class: 'table-wrap' },
+    el(
+      'table',
+      { class: 'table' },
+      el('thead', null, el('tr', null, th('Skill'), th('Used', 'num'), th('Last used'), th('Tokens', 'num'))),
+      el(
+        'tbody',
+        null,
+        rows.map((row) =>
+          el(
+            'tr',
+            { class: row.off ? 'is-off' : null },
+            el('td', null, el('div', { class: 'cell-title' }, row.name, row.off ? badge('stopped', 'Plugin off') : null), el('div', { class: 'meta' }, row.sourceLabel), row.description ? el('p', { class: 'skill-desc', title: row.description }, row.description) : null),
+            el('td', { class: 'num' }, row.usesLabel),
+            el('td', { class: 'nowrap' }, row.lastUsedLabel),
+            el('td', { class: 'num', title: 'Estimated from the length of its name and description' }, row.tokensLabel),
+          ),
+        ),
+      ),
+    ),
+  )
+}
+
+function pluginGrid(rows) {
+  return el(
+    'div',
+    { class: 'plugin-grid' },
+    rows.map((row) =>
+      el(
+        'article',
+        { class: row.on === false ? 'plugin-card is-off' : 'plugin-card' },
+        el('div', { class: 'plugin-head' }, el('h3', { class: 'plugin-name' }, row.name), row.statusLabel ? badge(row.on ? 'working' : 'stopped', row.statusLabel) : null),
+        row.description ? el('p', { class: 'plugin-desc', title: row.description }, row.description) : null,
+        el('p', { class: 'plugin-parts' }, row.partsLabel),
+        el('p', { class: 'meta' }, row.metaLabel),
+      ),
+    ),
+  )
+}
+
+function extensionPage(container, params, config) {
+  let query = params
+  let menu = null
+  setTitle(config.title)
+  const shell = pageShell(container, { title: config.title, intro: config.intro })
+  const resource = createResource(() => `${config.api}?${apiQuery({ account: query.get('account') })}`, render)
+  function section(title, note, extra, content) {
+    return el('section', { class: 'ext-section' }, el('div', { class: 'ext-head' }, el('div', { class: 'ext-heading' }, el('h2', { class: 'ext-title' }, title), el('p', { class: 'meta' }, note)), extra), content)
+  }
+  function accountMenu(data) {
+    if (menu) menu.close()
+    menu = null
+    if (!data.accounts.length) return null
+    const holder = el('div', { class: 'menu' })
+    const items = [{ key: 'all', label: 'All accounts' }, ...data.accounts]
+    const selected = data.account || 'all'
+    menu = createMenu(holder, { label: 'Account', align: 'end', onSelect: (key) => navigate(urlFor({ view: config.view, account: key === 'all' ? null : key })) })
+    menu.render(items.find((item) => item.key === selected).label, items, selected)
+    return holder
+  }
+  function render(state) {
+    const body = shell.body
+    body.classList.toggle('is-refreshing', state.status === 'refreshing')
+    if (state.status === 'loading' || (state.status === 'refreshing' && !state.data)) return body.replaceChildren(linesSkeleton(4))
+    if (state.status === 'scanning') return body.replaceChildren(scanBlock(state.scan), linesSkeleton(4))
+    if (state.status === 'error') return body.replaceChildren(errorBlock(`Could not load the ${config.noun}`, state.error, () => resource.load()))
+    const data = state.data
+    keepFocus(body, () =>
+      body.replaceChildren(
+        ...[
+          data.summaryLabel ? el('p', { class: 'page-meta' }, data.summaryLabel) : null,
+          section('On this computer', config.localNote, null, data.local.length ? config.list(data.local) : el('p', { class: 'meta' }, config.localEmpty)),
+          data.hasAccounts
+            ? section('Synced from claude.ai', config.syncedNote, accountMenu(data), data.synced.length ? config.list(data.synced) : el('p', { class: 'meta' }, data.account ? 'Nothing is synced for this account.' : `No ${config.noun} synced from claude.ai yet.`))
+            : null,
+        ].filter(Boolean),
+      ),
+    )
+  }
+  resource.load()
+  return {
+    update(next) {
+      query = next
+      resource.load()
+    },
+    destroy() {
+      resource.cancel()
+      if (menu) menu.close()
+    },
+  }
+}
+
+export function skillsPage(container, params) {
+  return extensionPage(container, params, {
+    view: 'skills',
+    title: 'Skills',
+    intro: 'Every skill Claude Code can use, how often you used it, and how many tokens it takes. Claude Code adds the name and description of each skill to every conversation.',
+    noun: 'skills',
+    api: '/api/skills',
+    localNote: 'Your own skills, and the skills that come with your plugins.',
+    localEmpty: 'No skills in your Claude folders yet.',
+    syncedNote: 'Skills from your claude.ai account. Claude Code keeps a copy on this computer.',
+    list: skillsTable,
+  })
+}
+
+export function pluginsPage(container, params) {
+  return extensionPage(container, params, {
+    view: 'plugins',
+    title: 'Plugins',
+    intro: 'Plugins added to Claude Code and what each one brings. Turn them on or off in Claude Code with /plugin.',
+    noun: 'plugins',
+    api: '/api/plugins',
+    localNote: 'Installed from a marketplace with /plugin.',
+    localEmpty: 'No plugins installed. Add one in Claude Code with /plugin.',
+    syncedNote: 'Plugins from your claude.ai account.',
+    list: pluginGrid,
   })
 }
 

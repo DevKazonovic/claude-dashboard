@@ -1,34 +1,46 @@
-import { $, getJson, live, routeFor } from './ui.js'
+import { $, getJson, live, routeFor, navigate, urlFor } from './ui.js'
 import { createSidebar } from './sidebar.js'
-import { overviewPage, livePage, conversationsPage, projectsPage, settingsPage, notFoundPage } from './pages.js'
-import { conversationPage } from './conversation.js'
+import { analyticsPage, conversationsPage, projectsPage, skillsPage, pluginsPage, settingsPage, notFoundPage } from './pages.js'
+import { overviewPage } from './flow.js'
+import { createPanels, CHAT_KEYS } from './panels.js'
 
 const LIVE_MS = 3000
-const VIEWS = { overview: overviewPage, live: livePage, conversations: conversationsPage, projects: projectsPage, settings: settingsPage, notfound: notFoundPage }
+const VIEWS = { overview: overviewPage, conversations: conversationsPage, projects: projectsPage, skills: skillsPage, plugins: pluginsPage, analytics: analyticsPage, settings: settingsPage, notfound: notFoundPage }
 
-function routeOf(location) {
-  const route = routeFor(location)
-  if (route.session) return { ...route, key: `session:${route.session}`, page: conversationPage }
-  return { ...route, key: route.view, page: VIEWS[route.view] }
+function pageParams(params) {
+  const copy = new URLSearchParams(params)
+  for (const key of CHAT_KEYS) copy.delete(key)
+  return copy
 }
 
 const sidebar = createSidebar()
+const panels = createPanels()
 let active = null
 
 function render() {
-  const route = routeOf(window.location)
-  sidebar.update(route)
-  if (active && active.key === route.key) {
-    active.controller.update(route.params)
+  const route = routeFor(window.location)
+  if (route.session) {
+    navigate(urlFor({ view: 'overview', chat: route.session, agent: route.agent, detail: route.params.get('detail') }), { replace: true })
+    return
+  }
+  const params = pageParams(route.params)
+  const signature = params.toString()
+  sidebar.update({ ...route, session: route.params.get('chat') })
+  panels.sync(route.params)
+  if (active && active.key === route.view) {
+    if (active.signature !== signature) {
+      active.signature = signature
+      active.controller.update(params)
+    }
     return
   }
   if (active) active.controller.destroy()
   const content = $('content')
   content.replaceChildren()
-  $('main').classList.toggle('is-chat', Boolean(route.session))
+  $('main').classList.toggle('is-canvas', route.view === 'overview')
   $('scroller').scrollTop = 0
-  active = { key: route.key, controller: route.page(content, route.params) }
-  content.focus({ preventScroll: true })
+  active = { key: route.view, signature, controller: VIEWS[route.view](content, params) }
+  if (!route.params.get('chat')) content.focus({ preventScroll: true })
 }
 
 let liveTimer = null

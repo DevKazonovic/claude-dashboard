@@ -37,8 +37,8 @@ const INPUT_MAX_HEIGHT = 200
 const OPEN_NOTE_MS = 5000
 const OPEN_NOTE_LONG_MS = 30000
 
-export function conversationPage(container, params) {
-  return createConversation(container, { id: params.get('session'), agent: null }, params)
+export function conversationView(container, id, params, href) {
+  return createConversation(container, { id, agent: null }, params, { href })
 }
 
 function toggleSet(set, key) {
@@ -132,6 +132,7 @@ function toolDetails(tool) {
 function createConversation(container, target, initialParams, options = {}) {
   const isAgent = Boolean(target.agent)
   const embedded = Boolean(options.onClose)
+  const { href } = options
   const query = `id=${encodeURIComponent(target.id)}${isAgent ? `&agent=${encodeURIComponent(target.agent)}` : ''}`
   const base = isAgent ? `/api/agent?${query}` : `/api/session?${query}`
   const state = {
@@ -256,6 +257,8 @@ function createConversation(container, target, initialParams, options = {}) {
     if (agentView) agentView.escape()
     else if (!slideover.hidden) closeDetail()
     else if (layout.classList.contains('side-open')) closeSide(true)
+    else return
+    event.preventDefault()
   }
   if (!embedded) document.addEventListener('keydown', onKey)
 
@@ -343,11 +346,11 @@ function createConversation(container, target, initialParams, options = {}) {
   }
 
   function pageUrl(detail) {
-    return urlFor({ session: target.id, agent: target.agent, detail })
+    return href({ agent: target.agent, detail })
   }
 
   function agentHref(agentId) {
-    return urlFor({ session: target.id, agent: agentId })
+    return href({ agent: agentId })
   }
 
   function agentLink(agentId, props, ...children) {
@@ -361,7 +364,7 @@ function createConversation(container, target, initialParams, options = {}) {
     }
     if (agentView) agentView.destroy()
     else agentReturnFocus = document.activeElement
-    agentView = { agent: agentId, ...createConversation(layout, { id: target.id, agent: agentId }, params, { onClose: closeAgent }) }
+    agentView = { agent: agentId, ...createConversation(layout, { id: target.id, agent: agentId }, params, { onClose: closeAgent, href: options.href }) }
   }
 
   function closeAgent() {
@@ -1400,7 +1403,7 @@ function createConversation(container, target, initialParams, options = {}) {
       else if (embedded) options.onClose()
     },
     depth() {
-      return state.detailOpenedHere ? 1 : 0
+      return (state.detailOpenedHere ? 1 : 0) + (agentView && agentOpenedHere ? 1 + agentView.depth() : 0)
     },
     destroy() {
       destroyed = true
