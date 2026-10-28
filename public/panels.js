@@ -1,8 +1,9 @@
 import { el, icon, navigate, urlFor, setTitle, createResource, badge, joinMeta, pager, errorBlock, scanBlock, linesSkeleton, keepFocus } from './ui.js'
-import { conversationView } from './conversation.js'
+import { conversationView, agentView } from './conversation.js'
 
-export const CHAT_KEYS = ['chat', 'agent', 'detail', 'office']
+export const CHAT_KEYS = ['chat', 'agent', 'detail', 'run']
 let openedHere = false
+let runOpenedHere = false
 let projectOpener = null
 
 function plainClick(event) {
@@ -20,6 +21,11 @@ function pageHref(extra) {
 export function openChat(id, agent, extra) {
   openedHere = true
   navigate(pageHref({ chat: id, agent, ...extra }))
+}
+
+export function openRun(id, agent) {
+  runOpenedHere = true
+  navigate(pageHref({ run: id, agent }))
 }
 
 export function openProject(project) {
@@ -65,6 +71,8 @@ export function projectLink(project, props, ...children) {
 export function createPanels() {
   let chat = null
   let chatReturn = null
+  let run = null
+  let runReturn = null
   let savedTitle = null
   let project = null
   let page = 1
@@ -165,9 +173,38 @@ export function createPanels() {
     chatReturn = null
   }
 
+  function closeRun() {
+    if (!run) return
+    if (runOpenedHere) window.history.go(-(1 + run.view.depth()))
+    else navigate(pageHref(), { replace: true })
+  }
+
+  function hideRun() {
+    runOpenedHere = false
+    if (!run) return
+    run.view.destroy()
+    run = null
+    const key = runReturn && runReturn.getAttribute('data-focus')
+    const back = runReturn && !document.contains(runReturn) && key ? document.querySelector(`[data-focus="${CSS.escape(key)}"]`) : runReturn
+    if (back && document.contains(back)) back.focus({ preventScroll: true })
+    runReturn = null
+  }
+
+  function syncRun(params) {
+    const id = params.get('run')
+    const agent = params.get('agent')
+    if (!id || !agent || params.get('chat')) return hideRun()
+    if (run && run.id === id && run.agent === agent) return run.view.update(params)
+    if (run) run.view.destroy()
+    else runReturn = document.activeElement
+    run = { id, agent, view: agentView(document.body, id, agent, params, { href: (extra) => pageHref({ run: id, ...extra }), onClose: closeRun, onOpenChat: () => openChat(id) }) }
+    run.view.focus()
+  }
+
   window.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || event.defaultPrevented) return
     if (chat) closeChat()
+    else if (run) run.view.escape()
     else if (!projectPanel.hidden) closeProject()
     else return
     event.preventDefault()
@@ -175,6 +212,7 @@ export function createPanels() {
 
   return {
     sync(params) {
+      syncRun(params)
       const id = params.get('chat')
       if (!id) return hideChat()
       if (chat && chat.id === id) return chat.view.update(params)

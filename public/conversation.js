@@ -26,7 +26,6 @@ import {
 } from './ui.js'
 import { renderMarkdown } from './markdown.js'
 import { createUsage } from './usage.js'
-import { createAgentOffice } from './office.js'
 
 const LIVE_MS = 3000
 const IDLE_MS = 15000
@@ -39,6 +38,10 @@ const OPEN_NOTE_LONG_MS = 30000
 
 export function conversationView(container, id, params, href) {
   return createConversation(container, { id, agent: null }, params, { href })
+}
+
+export function agentView(container, id, agent, params, options) {
+  return createConversation(container, { id, agent }, params, options)
 }
 
 function toggleSet(set, key) {
@@ -182,11 +185,13 @@ function createConversation(container, target, initialParams, options = {}) {
   const slideTitleId = `slide-title-${isAgent ? target.agent : target.id}`
   const slideTitle = el('h2', { class: 'slideover-title', id: slideTitleId })
   const slideMeta = el('p', { class: 'meta' })
+  const contextTitle = el('span')
+  const slideContext = options.onOpenChat ? el('p', { class: 'meta slide-context', hidden: true }, contextTitle, el('button', { class: 'text-button', type: 'button', onclick: () => options.onOpenChat() }, 'Open chat')) : null
   const slideBack = embedded ? el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Back to the agent', hidden: true, onclick: () => closeDetail() }, icon('back')) : null
   const slideClose = el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close', onclick: () => (embedded ? options.onClose() : closeDetail()) }, icon('close'))
   const slideBody = el('div', { class: 'slideover-body scroll-area', hidden: embedded })
   const agentPane = embedded ? el('div', { class: 'agent-pane' }, el('div', { class: 'agent-top' }, head, working, statusNote, notice), chatScroll) : null
-  const slideover = el('aside', { class: embedded ? 'slideover agent-slideover' : 'slideover', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': slideTitleId, hidden: !embedded }, el('div', { class: 'slideover-head' }, slideBack, el('div', { class: 'slideover-heading' }, slideTitle, slideMeta), slideClose), agentPane, slideBody)
+  const slideover = el('aside', { class: embedded ? 'slideover agent-slideover' : 'slideover', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': slideTitleId, hidden: !embedded }, el('div', { class: 'slideover-head' }, slideBack, el('div', { class: 'slideover-heading' }, slideTitle, slideMeta, slideContext), slideClose), agentPane, slideBody)
   const slideBackdrop = el('div', { class: 'slideover-backdrop', hidden: !embedded, onclick: () => (embedded ? options.onClose() : closeDetail()) })
 
   let detailsButton = null
@@ -194,11 +199,6 @@ function createConversation(container, target, initialParams, options = {}) {
   let vscodeButton = null
   let terminalButton = null
   let copyResume = null
-  let officeButton = null
-  let officeHolder = null
-  let officeView = null
-  let officeOn = false
-  let officeOpenedHere = false
   let tools = null
   let openNote = null
   let openNoteTimer = null
@@ -217,8 +217,7 @@ function createConversation(container, target, initialParams, options = {}) {
   else {
     composer = buildComposer()
     bottom = el('div', { class: 'chat-bottom', hidden: true }, el('div', { class: 'chat-wrap' }, composer.form))
-    officeHolder = el('div', { class: 'office-holder', hidden: true })
-    const pane = el('div', { class: 'chat-pane' }, el('div', { class: 'chat-top' }, el('div', { class: 'chat-wrap' }, head, notice)), chatScroll, officeHolder, bottom)
+    const pane = el('div', { class: 'chat-pane' }, el('div', { class: 'chat-top' }, el('div', { class: 'chat-wrap' }, head, notice)), chatScroll, bottom)
     sideBody = el('div', { class: 'side-body' })
     sideClose = el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close details', onclick: () => closeSide(true) }, icon('close'))
     side = el('aside', { class: 'side scroll-area', id: `side-${target.id}`, 'aria-label': 'Details' }, el('div', { class: 'side-head' }, el('h2', { class: 'side-title' }, 'Details'), sideClose), sideBody)
@@ -228,8 +227,7 @@ function createConversation(container, target, initialParams, options = {}) {
     vscodeButton = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'open-vscode', hidden: true, onclick: () => openIn('vscode') })
     terminalButton = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'open-terminal', hidden: true, onclick: () => openIn('terminal') })
     copyResume = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'copy-resume', 'aria-label': 'Copy the resume command', title: 'Copy the resume command', hidden: true, onclick: () => copyResumeCommand() }, icon('copy'))
-    officeButton = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'agent-office', hidden: true, onclick: () => toggleOffice() })
-    tools = el('span', { class: 'chat-tools', role: 'toolbar', 'aria-label': 'Conversation actions' }, officeButton, foldButton, vscodeButton, terminalButton, copyResume, detailsButton)
+    tools = el('span', { class: 'chat-tools', role: 'toolbar', 'aria-label': 'Conversation actions' }, foldButton, vscodeButton, terminalButton, copyResume, detailsButton)
     openNote = el('p', { class: 'open-note', role: 'status', hidden: true })
     notice.after(openNote)
     accountNote = el('p', { class: 'account-note', hidden: true })
@@ -442,64 +440,6 @@ function createConversation(container, target, initialParams, options = {}) {
     renderOpener()
   }
 
-  function toggleOffice() {
-    if (!officeOn) {
-      officeOpenedHere = true
-      navigate(href({ office: '1' }))
-    } else if (officeOpenedHere) window.history.back()
-    else navigate(href({}), { replace: true })
-  }
-
-  function officeRooms(data) {
-    const mood = data.status === 'busy' ? 'working' : data.status
-    const desk = (agent, team) => ({
-      key: agent.id,
-      agentId: agent.id,
-      label: agent.description || agent.phase || agent.typeLabel,
-      status: agent.status,
-      tool: agent.activity ? agent.activity.label : null,
-      detail: [team, agent.typeLabel, agent.statusLabel, agent.tokensLabel].filter(Boolean).join(' · '),
-      startedAt: agent.startedAt || agent.lastActiveAt || 0,
-    })
-    const byStart = (a, b) => a.startedAt - b.startedAt
-    const groups = data.agentGroups || []
-    const plain = groups.find((group) => group.key === 'subagents')
-    return [
-      { key: 'main', title: 'Main room', subtitle: plain ? plain.subtitle : 'No subagents', boss: { key: 'main-agent', label: 'Main agent', status: mood, tool: data.activity ? data.activity.label : null, detail: [data.statusLabel, data.tokensLabel].filter(Boolean).join(' · ') }, desks: plain ? plain.agents.map((agent) => desk(agent)).sort(byStart) : [] },
-      ...groups
-        .filter((group) => group.key !== 'subagents')
-        .map((group) => {
-          const name = group.title.replace(/^Workflow /, '')
-          return { key: group.key, title: name, subtitle: group.subtitle, boss: null, desks: group.agents.map((agent) => desk(agent, `Workflow ${name}`)).sort(byStart) }
-        }),
-    ]
-  }
-
-  function setOffice(on) {
-    if (on === officeOn) return
-    officeOn = on
-    chatScroll.hidden = on
-    officeHolder.hidden = !on
-    if (bottom) bottom.classList.toggle('is-office', on)
-    if (on) {
-      officeView = createAgentOffice(officeHolder, {
-        storeKey: 'claude-dashboard-office-finished-chat',
-        showFinished: true,
-        onOpen: (desk) => {
-          if (!desk.agentId) return toggleOffice()
-          agentOpenedHere = true
-          navigate(href({ agent: desk.agentId, office: '1' }))
-        },
-      })
-      if (state.status === 'ready') officeView.update(officeRooms(state.data))
-    } else {
-      officeOpenedHere = false
-      if (officeView) officeView.destroy()
-      officeView = null
-    }
-    renderOpener()
-  }
-
   async function copyResumeCommand() {
     try {
       await navigator.clipboard.writeText(state.data.resumeCommand)
@@ -536,12 +476,6 @@ function createConversation(container, target, initialParams, options = {}) {
       button.replaceChildren(state.opening === where ? spinner() : icon(glyph))
     }
     copyResume.hidden = !(ready && state.data.resumeCommand)
-    const officeLabel = officeOn ? 'Back to the chat' : 'Agent office'
-    officeButton.hidden = !(ready && state.data.agentGroups.length)
-    officeButton.replaceChildren(icon(officeOn ? 'chat' : 'office'))
-    officeButton.setAttribute('aria-label', officeLabel)
-    officeButton.setAttribute('aria-pressed', String(officeOn))
-    officeButton.title = officeLabel
   }
 
   function drawerMode() {
@@ -899,6 +833,9 @@ function createConversation(container, target, initialParams, options = {}) {
     const data = state.status === 'ready' ? state.data : null
     slideTitle.textContent = data ? data.title : 'Agent'
     slideMeta.textContent = data ? joinMeta([data.workflowLabel, data.modelsLabel, data.tokensLabel]) : ''
+    if (!slideContext || !data) return
+    contextTitle.textContent = data.session.title
+    slideContext.hidden = false
   }
 
   function agentSummary(data) {
@@ -1025,7 +962,6 @@ function createConversation(container, target, initialParams, options = {}) {
     renderAccount()
     renderSlideHead()
     keepFocus(head, () => head.replaceChildren(...(embedded ? agentSummary(state.data) : headContent(state.data))))
-    if (officeView) officeView.update(officeRooms(state.data))
     renderNotice()
     renderSide()
     renderWorking()
@@ -1462,12 +1398,10 @@ function createConversation(container, target, initialParams, options = {}) {
   renderFrame()
   load(false)
   const stopLive = live.subscribe(renderLive)
-  if (!embedded && initialParams.get('office') === '1') setOffice(true)
   if (!embedded && initialParams.get('agent')) openAgent(initialParams.get('agent'), initialParams)
 
   return {
     update(params) {
-      if (!embedded) setOffice(params.get('office') === '1')
       const agentId = embedded ? null : params.get('agent')
       if (agentId) {
         hideDetail()
@@ -1485,7 +1419,10 @@ function createConversation(container, target, initialParams, options = {}) {
       else if (embedded) options.onClose()
     },
     depth() {
-      return (state.detailOpenedHere ? 1 : 0) + (agentView && agentOpenedHere ? 1 + agentView.depth() : 0) + (officeOn && officeOpenedHere ? 1 : 0)
+      return (state.detailOpenedHere ? 1 : 0) + (agentView && agentOpenedHere ? 1 + agentView.depth() : 0)
+    },
+    focus() {
+      slideClose.focus({ preventScroll: true })
     },
     destroy() {
       destroyed = true
@@ -1501,7 +1438,6 @@ function createConversation(container, target, initialParams, options = {}) {
       }
       if (agentView) agentView.destroy()
       agentView = null
-      if (officeView) officeView.destroy()
       document.removeEventListener('keydown', onKey)
     },
   }

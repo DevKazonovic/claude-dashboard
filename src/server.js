@@ -8,6 +8,7 @@ const { createRuns } = require('./runs')
 const { createAccounts } = require('./accounts')
 const { createExtensions } = require('./extensions')
 const { createMarketplace } = require('./marketplace')
+const { createOps } = require('./ops')
 const { buildLive, buildHistory, buildOverview, buildProjects, buildRecents, scanDto } = require('./views')
 const { buildConversation, buildAgent, buildChat, buildTurn, sendMessage, stopMessage, openConversation, RequestError } = require('./conversation')
 const format = require('./format')
@@ -48,7 +49,11 @@ const STATIC_FILES = {
   '/pages.js': ['pages.js', SCRIPT],
   '/flow.js': ['flow.js', SCRIPT],
   '/panels.js': ['panels.js', SCRIPT],
-  '/office.js': ['office.js', SCRIPT],
+  '/ops.js': ['ops.js', SCRIPT],
+  '/ops3d.js': ['ops3d.js', SCRIPT],
+  '/vendor/three.core.min.js': ['vendor/three.core.min.js', SCRIPT],
+  '/vendor/three.module.min.js': ['vendor/three.module.min.js', SCRIPT],
+  '/vendor/CSS3DRenderer.js': ['vendor/CSS3DRenderer.js', SCRIPT],
   '/conversation.js': ['conversation.js', SCRIPT],
   '/usage.js': ['usage.js', SCRIPT],
 }
@@ -132,7 +137,7 @@ function sendJson(res, status, data) {
   send(res, status, JSON.stringify(data), 'application/json; charset=utf-8')
 }
 
-function createHandler(collector, timelines, runs, accounts, extensions, marketplace, port, report) {
+function createHandler(collector, timelines, runs, accounts, extensions, marketplace, ops, port, report) {
   const allowedHosts = new Set([`${HOST}:${port}`, `localhost:${port}`, `[::1]:${port}`])
   return async (req, res) => {
     if (!allowedHosts.has(req.headers.host)) return send(res, 403, 'Forbidden', 'text/plain; charset=utf-8')
@@ -177,6 +182,7 @@ function createHandler(collector, timelines, runs, accounts, extensions, marketp
         return sendJson(res, 200, { app: APP_ID, pid: process.pid, scan: scanDto(scan), counts: scan.status === 'done' ? await collector.counts() : null })
       }
       if (url.pathname === '/api/live') return sendJson(res, 200, await buildLive(collector, accounts))
+      if (url.pathname === '/api/ops') return sendJson(res, 200, await ops.build(collector))
       if (url.pathname === '/api/sessions') return sendJson(res, 200, await buildHistory(collector, params))
       if (url.pathname === '/api/overview') return sendJson(res, 200, await buildOverview(collector, params))
       if (url.pathname === '/api/projects') return sendJson(res, 200, await buildProjects(collector, params))
@@ -317,6 +323,7 @@ async function start(options) {
   const accounts = createAccounts(collector)
   const extensions = createExtensions(collector, accounts)
   const marketplace = createMarketplace()
+  const ops = createOps()
   await collector.init()
   for (let port = options.port; port < options.port + PORT_ATTEMPTS; port++) {
     const url = `http://${HOST}:${port}/`
@@ -325,7 +332,7 @@ async function start(options) {
       if (options.open) openBrowser(url, ui)
       return
     }
-    const server = http.createServer(createHandler(collector, timelines, runs, accounts, extensions, marketplace, port, (text) => ui.log(text, 'error')))
+    const server = http.createServer(createHandler(collector, timelines, runs, accounts, extensions, marketplace, ops, port, (text) => ui.log(text, 'error')))
     try {
       await listen(server, port)
     } catch (error) {

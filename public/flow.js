@@ -1,6 +1,6 @@
 import { el, icon, link, urlFor, navigate, setTitle, live, spinner, badge, joinMeta, stateBlock, errorBlock, keepFocus, reducedMotion, readStore, writeStore, createMenu, button } from './ui.js'
-import { openChat, openProject } from './panels.js'
-import { createAgentOffice } from './office.js'
+import { openChat, openProject, openRun } from './panels.js'
+import { createOps } from './ops.js'
 
 const NODE_W = 248
 const NODE_H = 64
@@ -19,7 +19,7 @@ const LAYOUT_KEY = 'claude-dashboard-flow-layout'
 const LAYOUTS = [
   { key: 'side', label: 'Sideways' },
   { key: 'down', label: 'Waterfall' },
-  { key: 'office', label: 'Office' },
+  { key: 'ops', label: 'Ops room' },
 ]
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const KIND_ICONS = { project: 'folder', session: 'chat', agent: 'bot', workflow: 'flow', more: 'layers' }
@@ -146,21 +146,6 @@ function edgePath(edge) {
   return `M ${x1} ${y1} H ${mid - r} Q ${mid} ${y1} ${mid} ${y1 + sy * r} V ${y2 - sy * r} Q ${mid} ${y2} ${mid + r} ${y2} H ${x2}`
 }
 
-function officeRooms(groups) {
-  const flatten = (nodes, team) => nodes.flatMap((node) => (node.kind === 'more' ? flatten(node.nodes, team) : node.kind === 'workflow' ? node.agents.map((agent) => ({ agent, team: `Workflow ${node.name}` })) : [{ agent: node, team }]))
-  return groups.flatMap((group) =>
-    group.sessions.map((session) => ({
-      key: session.id,
-      title: session.title,
-      subtitle: joinMeta([group.name, session.whereLabel, session.tokensLabel]),
-      boss: { key: `boss-${session.id}`, sessionId: session.id, label: 'Main agent', status: session.status, tool: session.activity ? session.activity.label : null, detail: joinMeta([session.statusLabel, session.agentsLabel]) },
-      desks: flatten(session.agentNodes, null)
-        .map(({ agent, team }) => ({ key: `${session.id}-${agent.id}`, sessionId: session.id, agentId: agent.id, label: agent.description, status: agent.status, tool: agent.activity ? agent.activity.label : null, detail: joinMeta([team, agent.typeLabel, agent.statusLabel, agent.tokensLabel]), startedAt: agent.startedAt || agent.lastActiveAt || 0 }))
-        .sort((a, b) => a.startedAt - b.startedAt),
-    })),
-  )
-}
-
 function activityLabel(activity) {
   return [activity.label, activity.target].filter(Boolean).join(' ')
 }
@@ -194,9 +179,10 @@ export function overviewPage(container, params) {
   let moveTimer = null
   let lastState = null
   let miniScale = 1
-  let direction = ['down', 'office'].includes(readStore(LAYOUT_KEY)) ? readStore(LAYOUT_KEY) : 'side'
-  let office = null
+  let direction = ['down', 'ops'].includes(readStore(LAYOUT_KEY)) ? readStore(LAYOUT_KEY) : 'side'
+  let room = null
   let project = params.get('project') || null
+  let inside = params.get('conversation') || null
   const edgeEls = new Map()
 
   const defs = svg('defs')
@@ -233,8 +219,8 @@ export function overviewPage(container, params) {
   const projectHolder = el('div', { class: 'menu' })
   const projectMenu = createMenu(projectHolder, { label: 'Project', align: 'end', onSelect: (key) => navigate(urlFor({ view: 'overview', project: key === 'all' ? null : key })) })
   const tools = el('div', { class: 'flow-tools' }, projectHolder, switcher)
-  const officeHolder = el('div', { class: 'flow-office', hidden: true })
-  const canvas = el('section', { class: 'flow', 'aria-label': 'Map of the running conversations and their agents' }, world, officeHolder, head, pill, empty, tools, controls, mini)
+  const roomHolder = el('div', { class: 'flow-ops', hidden: true })
+  const canvas = el('section', { class: 'flow', 'aria-label': 'Map of the running conversations and their agents' }, world, roomHolder, head, pill, empty, tools, controls, mini)
 
   container.replaceChildren(canvas)
 
@@ -301,8 +287,16 @@ export function overviewPage(container, params) {
     move({ x: w / 2 - (node.x + NODE_W / 2) * view.k, y: h / 2 - (node.y + NODE_H / 2) * view.k }, true)
   }
 
+  function shown() {
+    return inside ? 'ops' : direction
+  }
+
+  function onScreen(id, replace) {
+    navigate(urlFor({ view: 'overview', project, conversation: id }), { replace })
+  }
+
   function openNode(node) {
-    if (node.kind === 'more') openChat(node.session.id, null, { office: '1' })
+    if (node.kind === 'more') onScreen(node.session.id, false)
     else if (node.kind !== 'project') openChat(node.session.id, node.kind === 'agent' ? node.item.id : null)
     else if (node.item.project) openProject(node.item.project)
   }
@@ -399,13 +393,13 @@ export function overviewPage(container, params) {
     projectMenu.render(chosen ? chosen.label : project ? project.split('/').pop() : 'All projects', [{ key: 'all', label: 'All projects' }, ...choices], project || 'all')
     summary.textContent = project ? (groups[0] ? groups[0].summaryLabel : 'Nothing running in this project') : data.totals.summaryLabel
     const bare = !groups.length
-    const desk = direction === 'office'
+    const opsRoom = shown() === 'ops'
     empty.hidden = !bare
-    controls.hidden = bare || desk
-    mini.toggleAttribute('hidden', bare || desk)
-    world.hidden = desk
-    officeHolder.hidden = !desk || bare
-    canvas.classList.toggle('is-office', desk)
+    controls.hidden = bare || opsRoom
+    mini.toggleAttribute('hidden', bare || opsRoom)
+    world.hidden = opsRoom
+    roomHolder.hidden = !opsRoom || bare
+    canvas.classList.toggle('is-ops', opsRoom)
     tools.hidden = !data.groups.length
     if (bare && project) {
       empty.replaceChildren(stateBlock({ title: `Nothing is running in ${project.split('/').pop()}`, text: 'Its conversations show up here again as soon as one is open in Claude Code.', actions: [button('Show all projects', () => navigate(urlFor({ view: 'overview' })))] }))
@@ -413,11 +407,13 @@ export function overviewPage(container, params) {
       empty.replaceChildren(stateBlock({ title: 'Nothing is running', text: 'Start Claude Code in a terminal, VS Code or the desktop app. It shows up here within a few seconds.', actions: [link(urlFor({ view: 'conversations' }), { class: 'button' }, 'See past conversations')] }))
     }
     lastState = state
-    if (desk) {
-      if (!office) office = createAgentOffice(officeHolder, { storeKey: 'claude-dashboard-office-finished-overview', showFinished: false, onOpen: (item) => openChat(item.sessionId, item.agentId || null) })
-      office.update(officeRooms(groups))
+    if (opsRoom) {
+      if (!room) room = createOps(roomHolder, { onAgent: openRun, onPick: (id) => onScreen(id, true) })
+      room.update(groups, inside)
       return
     }
+    if (room) room.destroy()
+    room = null
     const first = !graph
     graph = direction === 'down' ? waterfallLayout(treeOf(groups)) : sideLayout(treeOf(groups))
     byKey = new Map(graph.nodes.map((node) => [node.key, node]))
@@ -429,7 +425,7 @@ export function overviewPage(container, params) {
   }
 
   function onPointerDown(event) {
-    if (direction === 'office' || event.target.closest('.flow-node, .flow-controls, .flow-tools, .flow-empty')) return
+    if (shown() === 'ops' || event.target.closest('.flow-node, .flow-controls, .flow-tools, .flow-empty')) return
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
     canvas.setPointerCapture(event.pointerId)
     if (event.target.closest('.flow-minimap')) {
@@ -483,7 +479,7 @@ export function overviewPage(container, params) {
   }
 
   function onWheel(event) {
-    if (direction === 'office' || event.target.closest('.flow-empty, .flow-tools')) return
+    if (shown() === 'ops' || event.target.closest('.flow-empty, .flow-tools')) return
     event.preventDefault()
     const box = canvas.getBoundingClientRect()
     const delta = event.deltaY * (event.deltaMode === 1 ? 16 : 1)
@@ -510,18 +506,19 @@ export function overviewPage(container, params) {
   function renderSwitch() {
     keepFocus(switcher, () =>
       switcher.replaceChildren(
-        ...LAYOUTS.map((entry) => el('button', { class: 'flow-switch-option', type: 'button', 'aria-pressed': String(entry.key === direction), 'data-focus': `layout-${entry.key}`, onclick: () => setLayout(entry.key) }, entry.label)),
+        ...LAYOUTS.map((entry) => el('button', { class: 'flow-switch-option', type: 'button', 'aria-pressed': String(entry.key === shown()), 'data-focus': `layout-${entry.key}`, onclick: () => setLayout(entry.key) }, entry.label)),
       ),
     )
   }
 
   function setLayout(key) {
-    if (key === direction) return
+    if (key === shown()) return
     direction = key
     writeStore(LAYOUT_KEY, key === 'side' ? null : key)
     renderSwitch()
     touched = false
-    if (lastState) render(lastState)
+    if (inside) navigate(urlFor({ view: 'overview', project }), { replace: true })
+    else if (lastState) render(lastState)
   }
 
   renderSwitch()
@@ -530,9 +527,12 @@ export function overviewPage(container, params) {
   return {
     update(next) {
       const value = next.get('project') || null
-      if (value === project) return
+      const conversation = next.get('conversation') || null
+      if (value === project && conversation === inside) return
+      if (value !== project) touched = false
       project = value
-      touched = false
+      inside = conversation
+      renderSwitch()
       if (lastState) render(lastState)
     },
     destroy() {
@@ -540,6 +540,7 @@ export function overviewPage(container, params) {
       unsubscribe()
       resize.disconnect()
       window.clearTimeout(moveTimer)
+      if (room) room.destroy()
     },
   }
 }
