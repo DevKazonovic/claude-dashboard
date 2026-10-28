@@ -1,11 +1,18 @@
 const fs = require('fs')
 const path = require('path')
+const { spawn } = require('child_process')
 const format = require('./format')
 const { createJsonCache, readdirSafe, statSafe } = require('./collector')
 const { scanState } = require('./views')
 
 const SYNCED_PREFIX = 'anthropic-skills'
 const SYNCED_SOURCES = { anthropic: 'By Anthropic', 'anthropic-example': 'By Anthropic', custom: 'Uploaded to claude.ai', plugin: 'From a claude.ai plugin' }
+const EDIT_TIMEOUT_MS = 5 * 60 * 1000
+const MESSAGE_LIMIT = 4000
+const FILES_LIMIT = 200
+const SESSION = /^[0-9a-f-]{36}$/i
+const EDIT_TOOLS = 'Read,Edit,Write,Glob,Grep'
+const EDIT_PROMPT = 'You are working inside one Claude Code skill folder. Read and change only the files in this folder (SKILL.md and the files next to it) to do what the user asks.'
 const PARTS = [
   ['skills', 'skill', 'skills'],
   ['commands', 'command', 'commands'],
@@ -64,7 +71,7 @@ async function skillsIn(dir) {
     const text = await readText(path.join(dir, entry.name, 'SKILL.md'))
     if (!text) continue
     const fields = frontmatter(text)
-    found.push({ name: str(fields.name) || entry.name, description: str(fields.description) })
+    found.push({ name: str(fields.name) || entry.name, description: str(fields.description), dir: path.join(dir, entry.name) })
   }
   return found
 }
@@ -73,7 +80,7 @@ async function skillsAt(dir) {
   const text = await readText(path.join(dir, 'SKILL.md'))
   if (!text) return skillsIn(dir)
   const fields = frontmatter(text)
-  return [{ name: str(fields.name) || path.basename(dir), description: str(fields.description) }]
+  return [{ name: str(fields.name) || path.basename(dir), description: str(fields.description), dir }]
 }
 
 async function countMarkdown(target) {
@@ -197,6 +204,57 @@ async function syncedPlugins(bucket, readJson) {
   return plugins
 }
 
+async function filesIn(root, dir = root, found = []) {
+  for (const entry of await readdirSafe(dir)) {
+    if (found.length >= FILES_LIMIT) break
+    if (entry.name.startsWith('.')) continue
+    const file = path.join(dir, entry.name)
+    if (entry.isDirectory()) await filesIn(root, file, found)
+    else found.push(path.relative(root, file))
+  }
+  return found
+}
+
+function runEdit(dir, message, session) {
+  return new Promise((resolve, reject) => {
+    const args = ['-p', '--output-format', 'json', '--permission-mode', 'acceptEdits', '--tools', EDIT_TOOLS, '--strict-mcp-config', '--settings', JSON.stringify({ disableAllHooks: true }), '--append-system-prompt', EDIT_PROMPT]
+    if (session) args.push('--resume', session)
+    let child
+    try {
+      child = spawn('claude', args, { cwd: dir, env: process.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+    } catch (error) {
+      reject(error)
+      return
+    }
+    let output = ''
+    let errors = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => {
+      output += chunk
+    })
+    child.stderr.on('data', (chunk) => {
+      errors = `${errors}${chunk}`.slice(-2000)
+    })
+    const timer = setTimeout(() => child.kill('SIGKILL'), EDIT_TIMEOUT_MS)
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.on('close', (code, signal) => {
+      clearTimeout(timer)
+      let result = null
+      try {
+        result = JSON.parse(output.trim().split('\n').pop())
+      } catch {}
+      if (code === 0 && result && !result.is_error) return resolve({ reply: str(result.result), session: str(result.session_id) })
+      const last = errors.trim().split('\n').filter(Boolean).slice(-2).join(' ')
+      reject(new Error(signal ? 'Claude took longer than 5 minutes and was stopped.' : (result && str(result.result)) || last || `Claude Code stopped with exit code ${code}.`))
+    })
+    child.stdin.end(message)
+  })
+}
+
 function contextTokens(name, description) {
   return Math.ceil(`- ${name}: ${description}`.length / 4)
 }
@@ -228,6 +286,7 @@ function applyUses(skills, uses) {
 
 function createExtensions(collector, accounts) {
   const readJson = createJsonCache()
+  const editing = new Set()
 
   async function gather() {
     await collector.init()
@@ -238,7 +297,7 @@ function createExtensions(collector, accounts) {
     const seen = new Set()
     for (const dir of dirs) {
       const folder = dirs.length > 1 ? format.homePath(dir) : null
-      for (const skill of await skillsIn(path.join(dir, 'skills'))) skills.push({ ...skill, key: skill.name, folder, sourceLabel: 'Your skill' })
+      for (const skill of await skillsIn(path.join(dir, 'skills'))) skills.push({ ...skill, key: skill.name, folder, editable: true, sourceLabel: 'Your skill' })
       for (const plugin of await installedPlugins(dir, readJson)) {
         plugins.push({ ...plugin, folder })
         for (const skill of plugin.parts.skills) skills.push({ ...skill, key: `${plugin.name}:${skill.name}`, folder, off: plugin.on === false, sourceLabel: `Plugin ${plugin.name}` })
@@ -250,7 +309,7 @@ function createExtensions(collector, accounts) {
           const key = `${SYNCED_PREFIX}:${name}`
           if (!name || seen.has(`${bucket.account.key}:${key}`)) continue
           seen.add(`${bucket.account.key}:${key}`)
-          skills.push({ name, description: str(skill.description), key, account: bucket.account, sourceLabel: SYNCED_SOURCES[skill.source] || 'From claude.ai' })
+          skills.push({ name, description: str(skill.description), dir: path.join(bucket.dir, name), key, account: bucket.account, sourceLabel: SYNCED_SOURCES[skill.source] || 'From claude.ai' })
         }
       }
       for (const bucket of await syncedBuckets(dir, 'plugins', signed)) {
@@ -295,7 +354,48 @@ function createExtensions(collector, accounts) {
     }
   }
 
+  async function skillDetail(id) {
+    if (typeof id !== 'string' || !id) return null
+    const skill = (await gather()).skills.find((entry) => entry.dir === id)
+    if (!skill) return null
+    const text = await readText(path.join(skill.dir, 'SKILL.md'))
+    return {
+      id: skill.dir,
+      name: skill.name,
+      description: skill.description,
+      sourceLabel: skill.sourceLabel,
+      folderLabel: format.homePath(skill.dir),
+      editable: Boolean(skill.editable),
+      busy: editing.has(skill.dir),
+      lockedNote: skill.editable ? null : skill.account ? 'Synced from claude.ai. The next sync replaces these files, so change it on claude.ai.' : 'Part of a plugin. The next plugin update replaces these files, so it cannot be edited here.',
+      content: text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim(),
+      files: (await filesIn(skill.dir)).filter((file) => file !== 'SKILL.md').sort(),
+    }
+  }
+
   return {
+    skill: (params) => skillDetail(params.get('id')),
+    async editSkill(body) {
+      const skill = await skillDetail(body.id)
+      if (!skill) throw Object.assign(new Error('This skill was not found on this computer.'), { status: 404 })
+      if (!skill.editable) throw Object.assign(new Error('Only your own skills can be edited here.'), { status: 403 })
+      const message = typeof body.message === 'string' ? body.message.trim() : ''
+      if (!message) throw Object.assign(new Error('Write what Claude should change.'), { status: 400 })
+      if (message.length > MESSAGE_LIMIT) throw Object.assign(new Error('The message is too long.'), { status: 400 })
+      if (editing.has(skill.id)) throw Object.assign(new Error('Claude is already working on this skill.'), { status: 409 })
+      const session = typeof body.session === 'string' && SESSION.test(body.session) ? body.session : null
+      editing.add(skill.id)
+      try {
+        const result = await runEdit(skill.id, message, session)
+        editing.delete(skill.id)
+        return { ...result, skill: await skillDetail(skill.id) }
+      } catch (error) {
+        if (error.code === 'ENOENT') throw Object.assign(new Error('Could not find the claude command.'), { status: 500 })
+        throw Object.assign(new Error(error.message), { status: 502 })
+      } finally {
+        editing.delete(skill.id)
+      }
+    },
     async skills(params) {
       const waiting = await scanState(collector)
       if (waiting) return waiting
@@ -306,14 +406,14 @@ function createExtensions(collector, accounts) {
       const row = (skill) => {
         const tokens = contextTokens(skill.name, skill.description)
         return {
+          id: skill.dir,
           name: skill.name,
           description: skill.description,
           sourceLabel: [skill.sourceLabel, skill.folder, view.several && skill.account ? skill.account.email : null].filter(Boolean).join(' · '),
           off: Boolean(skill.off),
-          usesLabel: format.count(skill.uses),
-          lastUsedLabel: skill.lastUsedAt ? format.capitalize(format.ago(skill.lastUsedAt, now)) : 'Never',
+          editable: Boolean(skill.editable),
+          statsLabel: [skill.uses ? `Used ${format.plural(skill.uses, 'time', 'times')}` : 'Not used yet', skill.uses && skill.lastUsedAt ? `last ${format.ago(skill.lastUsedAt, now)}` : null, `~${format.tokens(tokens)} tokens`].filter(Boolean).join(' · '),
           tokens,
-          tokensLabel: `~${format.tokens(tokens)}`,
         }
       }
       const order = (a, b) => b.uses - a.uses || b.lastUsedAt - a.lastUsedAt || a.name.localeCompare(b.name)

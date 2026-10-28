@@ -7,6 +7,7 @@ const { createTimelines } = require('./timeline')
 const { createRuns } = require('./runs')
 const { createAccounts } = require('./accounts')
 const { createExtensions } = require('./extensions')
+const { createMarketplace } = require('./marketplace')
 const { buildLive, buildHistory, buildOverview, buildProjects, buildRecents, scanDto } = require('./views')
 const { buildConversation, buildAgent, buildChat, buildTurn, sendMessage, stopMessage, openConversation, RequestError } = require('./conversation')
 const format = require('./format')
@@ -47,6 +48,7 @@ const STATIC_FILES = {
   '/pages.js': ['pages.js', SCRIPT],
   '/flow.js': ['flow.js', SCRIPT],
   '/panels.js': ['panels.js', SCRIPT],
+  '/office.js': ['office.js', SCRIPT],
   '/conversation.js': ['conversation.js', SCRIPT],
   '/usage.js': ['usage.js', SCRIPT],
 }
@@ -56,7 +58,7 @@ const HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 }
-const POST_ROUTES = new Set(['/api/send', '/api/stop', '/api/open', '/api/accounts/refresh'])
+const POST_ROUTES = new Set(['/api/send', '/api/stop', '/api/open', '/api/accounts/refresh', '/api/skills/edit', '/api/marketplace/action'])
 const BODY_LIMIT = 256 * 1024
 
 function readBody(req) {
@@ -130,7 +132,7 @@ function sendJson(res, status, data) {
   send(res, status, JSON.stringify(data), 'application/json; charset=utf-8')
 }
 
-function createHandler(collector, timelines, runs, accounts, extensions, port, report) {
+function createHandler(collector, timelines, runs, accounts, extensions, marketplace, port, report) {
   const allowedHosts = new Set([`${HOST}:${port}`, `localhost:${port}`, `[::1]:${port}`])
   return async (req, res) => {
     if (!allowedHosts.has(req.headers.host)) return send(res, 403, 'Forbidden', 'text/plain; charset=utf-8')
@@ -146,6 +148,20 @@ function createHandler(collector, timelines, runs, accounts, extensions, port, r
         if (!body) return sendJson(res, 400, { error: 'The request body is not valid JSON.' })
         if (url.pathname === '/api/send') return sendJson(res, 200, await sendMessage(collector, runs, body))
         if (url.pathname === '/api/open') return sendJson(res, 200, await openConversation(collector, runs, body))
+        if (url.pathname === '/api/marketplace/action') {
+          try {
+            return sendJson(res, 200, await marketplace.act(body))
+          } catch (error) {
+            return sendJson(res, error.status || 500, { error: error.message })
+          }
+        }
+        if (url.pathname === '/api/skills/edit') {
+          try {
+            return sendJson(res, 200, await extensions.editSkill(body))
+          } catch (error) {
+            return sendJson(res, error.status || 500, { error: error.message })
+          }
+        }
         if (url.pathname === '/api/accounts/refresh') {
           if (typeof body.key !== 'string' || !body.key) return sendJson(res, 400, { error: 'Choose an account to refresh.' })
           try {
@@ -168,6 +184,17 @@ function createHandler(collector, timelines, runs, accounts, extensions, port, r
       if (url.pathname === '/api/accounts') return sendJson(res, 200, await accounts.list())
       if (url.pathname === '/api/skills') return sendJson(res, 200, await extensions.skills(params))
       if (url.pathname === '/api/plugins') return sendJson(res, 200, await extensions.plugins(params))
+      if (url.pathname === '/api/marketplace') return sendJson(res, 200, await marketplace.list(params))
+      if (url.pathname === '/api/marketplace/plugin') {
+        const plugin = await marketplace.plugin(params)
+        if (!plugin) return sendJson(res, 404, { error: 'This plugin is not in your marketplaces.' })
+        return sendJson(res, 200, plugin)
+      }
+      if (url.pathname === '/api/skill') {
+        const skill = await extensions.skill(params)
+        if (!skill) return sendJson(res, 404, { error: 'This skill was not found on this computer.' })
+        return sendJson(res, 200, skill)
+      }
       if (url.pathname === '/api/settings') return sendJson(res, 200, { folders: await accounts.folders(), scan: scanDto(collector.scanStatus()) })
       if (url.pathname === '/api/session') {
         const session = await buildConversation(collector, timelines, runs, accounts, params)
@@ -289,6 +316,7 @@ async function start(options) {
   const runs = createRuns((text, tone) => ui.log(text, tone))
   const accounts = createAccounts(collector)
   const extensions = createExtensions(collector, accounts)
+  const marketplace = createMarketplace()
   await collector.init()
   for (let port = options.port; port < options.port + PORT_ATTEMPTS; port++) {
     const url = `http://${HOST}:${port}/`
@@ -297,7 +325,7 @@ async function start(options) {
       if (options.open) openBrowser(url, ui)
       return
     }
-    const server = http.createServer(createHandler(collector, timelines, runs, accounts, extensions, port, (text) => ui.log(text, 'error')))
+    const server = http.createServer(createHandler(collector, timelines, runs, accounts, extensions, marketplace, port, (text) => ui.log(text, 'error')))
     try {
       await listen(server, port)
     } catch (error) {

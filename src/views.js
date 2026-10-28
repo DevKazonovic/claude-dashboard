@@ -159,6 +159,7 @@ function agentDto(agent, main, record, now) {
   const totals = sumModels(models)
   const status = agentStatus(agent, main, record, now)
   const lastActiveAt = agent.state.mtimeMs || null
+  const startedAt = agent.state.data.firstTs ? Date.parse(agent.state.data.firstTs) : NaN
   return {
     id: agent.ref.id,
     workflowId: agent.ref.workflowId,
@@ -169,6 +170,7 @@ function agentDto(agent, main, record, now) {
     status,
     statusLabel: AGENT_STATUS[status],
     lastActiveAt,
+    startedAt: Number.isFinite(startedAt) ? startedAt : null,
     lastActiveLabel: lastActiveAt ? format.capitalize(format.ago(lastActiveAt, now)) : 'Unknown',
     modelsLabel: modelRows(models).map((row) => row.label).join(', ') || 'No model calls yet',
     messages: totals.messages,
@@ -323,6 +325,7 @@ function agentNode(agent) {
     tokensLabel: agent.tokensLabel,
     modelsLabel: agent.modelsLabel,
     lastActiveAt: agent.lastActiveAt || 0,
+    startedAt: agent.startedAt,
     lastActiveLabel: agent.lastActiveLabel,
   }
 }

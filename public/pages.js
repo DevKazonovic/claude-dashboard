@@ -24,11 +24,17 @@ import {
   pager,
   scanBlock,
   button,
+  icon,
+  spinner,
+  getJson,
+  postJson,
+  fact,
   THEMES,
   currentTheme,
   setTheme,
 } from './ui.js'
 import { createUsage } from './usage.js'
+import { renderMarkdown } from './markdown.js'
 import { chatLink, projectLink, openChat, openProject } from './panels.js'
 
 const REFRESH_MS = 30000
@@ -39,6 +45,11 @@ const CONVERSATION_SORTS = [
   { key: 'tokens:asc', label: 'Fewest tokens' },
   { key: 'started:desc', label: 'Newest' },
   { key: 'started:asc', label: 'Oldest' },
+]
+const MARKET_SORTS = [
+  { key: 'installs', label: 'Most installed' },
+  { key: 'updated', label: 'Recently updated' },
+  { key: 'name', label: 'Name' },
 ]
 const PROJECT_SORTS = [
   { key: 'tokens:desc', label: 'Most tokens' },
@@ -471,30 +482,184 @@ export function projectsPage(container, params) {
   })
 }
 
-function skillsTable(rows) {
+function rememberFocus() {
+  const active = document.activeElement
+  const key = active && active.getAttribute ? active.getAttribute('data-focus') : null
+  return () => {
+    const target = active && document.contains(active) ? active : key ? document.querySelector(`[data-focus="${CSS.escape(key)}"]`) : null
+    if (target) target.focus({ preventScroll: true })
+  }
+}
+
+function skillCards(rows, open) {
   return el(
     'div',
-    { class: 'table-wrap' },
-    el(
-      'table',
-      { class: 'table' },
-      el('thead', null, el('tr', null, th('Skill'), th('Used', 'num'), th('Last used'), th('Tokens', 'num'))),
+    { class: 'plugin-grid' },
+    rows.map((row) =>
       el(
-        'tbody',
-        null,
-        rows.map((row) =>
-          el(
-            'tr',
-            { class: row.off ? 'is-off' : null },
-            el('td', null, el('div', { class: 'cell-title' }, row.name, row.off ? badge('stopped', 'Plugin off') : null), el('div', { class: 'meta' }, row.sourceLabel), row.description ? el('p', { class: 'skill-desc', title: row.description }, row.description) : null),
-            el('td', { class: 'num' }, row.usesLabel),
-            el('td', { class: 'nowrap' }, row.lastUsedLabel),
-            el('td', { class: 'num', title: 'Estimated from the length of its name and description' }, row.tokensLabel),
-          ),
-        ),
+        'button',
+        { class: row.off ? 'plugin-card skill-card is-off' : 'plugin-card skill-card', type: 'button', 'aria-haspopup': 'dialog', 'data-focus': `skill-${row.id}`, onclick: () => open(row) },
+        el('span', { class: 'plugin-head' }, el('span', { class: 'plugin-name' }, row.name), row.off ? badge('stopped', 'Plugin off') : null),
+        row.description ? el('span', { class: 'plugin-desc' }, row.description) : null,
+        el('span', { class: 'meta' }, row.sourceLabel),
+        el('span', { class: 'plugin-parts' }, row.statsLabel),
       ),
     ),
   )
+}
+
+function createSkillPanel(onEdited) {
+  let current = null
+  let request = 0
+  const meta = el('p', { class: 'meta' })
+  const title = el('h2', { class: 'slideover-title', id: 'skill-panel-title' })
+  const close = el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close the skill', onclick: () => hide() }, icon('close'))
+  const body = el('div', { class: 'slideover-body scroll-area' })
+  const foot = el('div', { class: 'skill-foot' })
+  const backdrop = el('div', { class: 'slideover-backdrop', hidden: true, onclick: () => hide() })
+  const panel = el('aside', { class: 'slideover skill-panel', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'skill-panel-title', hidden: true }, el('div', { class: 'slideover-head' }, el('div', { class: 'slideover-heading' }, meta, title), close), body, foot)
+  let restore = null
+  document.body.append(backdrop, panel)
+
+  const input = el('textarea', { class: 'composer-input', rows: '2', 'aria-label': 'What Claude should change in this skill', placeholder: 'Tell Claude what to change in this skill', spellcheck: 'true' })
+  const send = el('button', { class: 'button primary small', type: 'submit' }, 'Send')
+  const error = el('p', { class: 'composer-error', role: 'alert', hidden: true })
+  const composer = el(
+    'form',
+    {
+      class: 'composer',
+      onsubmit: (event) => {
+        event.preventDefault()
+        submit()
+      },
+    },
+    el('div', { class: 'composer-box' }, input, el('div', { class: 'composer-actions' }, send)),
+    error,
+  )
+  input.addEventListener('input', () => {
+    input.style.setProperty('height', 'auto')
+    input.style.setProperty('height', `${Math.min(input.scrollHeight, 200)}px`)
+  })
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault()
+      submit()
+    }
+  })
+
+  function thread() {
+    if (!current.messages.length && !current.busy) return null
+    return el(
+      'section',
+      { class: 'skill-thread', 'aria-label': 'Edits with Claude' },
+      current.messages.map((message) =>
+        el('div', { class: `skill-msg is-${message.role}` }, el('span', { class: 'skill-msg-who' }, message.role === 'you' ? 'You' : message.role === 'claude' ? 'Claude' : 'Error'), message.role === 'claude' ? el('div', { class: 'md' }, renderMarkdown(message.text)) : el('p', { class: 'skill-msg-text' }, message.text)),
+      ),
+      current.busy ? el('p', { class: 'live-line' }, spinner(), el('span', { class: 'live-text' }, el('span', { class: 'live-label' }, 'Claude is working on this skill'))) : null,
+    )
+  }
+
+  function render() {
+    const detail = current.detail
+    if (!detail) {
+      body.replaceChildren(linesSkeleton(6))
+      foot.replaceChildren()
+      return
+    }
+    body.replaceChildren(
+      ...[
+        detail.description ? el('p', { class: 'skill-summary' }, detail.description) : null,
+        el('p', { class: 'meta skill-path' }, detail.folderLabel),
+        detail.content ? el('div', { class: 'md skill-content' }, renderMarkdown(detail.content)) : el('p', { class: 'meta' }, 'SKILL.md has no instructions yet.'),
+        detail.files.length ? el('section', { class: 'skill-files' }, el('h3', { class: 'skill-files-title' }, 'Other files'), el('ul', null, detail.files.map((file) => el('li', null, file)))) : null,
+        thread(),
+      ].filter(Boolean),
+    )
+    send.disabled = current.busy
+    input.disabled = current.busy
+    foot.replaceChildren(detail.editable ? composer : el('p', { class: 'note skill-locked' }, detail.lockedNote))
+  }
+
+  async function load(id) {
+    const mine = ++request
+    try {
+      const detail = await getJson(`/api/skill?${new URLSearchParams({ id })}`)
+      if (mine !== request || !current) return
+      current.detail = detail
+      if (detail.busy) current.busy = true
+    } catch (reason) {
+      if (mine !== request || !current) return
+      body.replaceChildren(errorBlock('Could not load this skill', reason.message, () => load(id)))
+      return
+    }
+    render()
+  }
+
+  async function submit() {
+    const message = input.value.trim()
+    if (!current || current.busy || !message) return
+    const target = current
+    target.messages.push({ role: 'you', text: message })
+    target.busy = true
+    input.value = ''
+    input.style.removeProperty('height')
+    error.hidden = true
+    render()
+    body.scrollTop = body.scrollHeight
+    try {
+      const result = await postJson('/api/skills/edit', { id: target.id, message, session: target.session })
+      target.session = result.session || target.session
+      target.messages.push({ role: 'claude', text: result.reply || 'Done.' })
+      if (result.skill) target.detail = result.skill
+      onEdited()
+    } catch (reason) {
+      target.messages.push({ role: 'error', text: reason.message })
+    }
+    target.busy = false
+    if (current !== target) return
+    render()
+    body.scrollTop = body.scrollHeight
+    input.focus({ preventScroll: true })
+  }
+
+  function hide() {
+    if (panel.hidden) return
+    request++
+    current = null
+    panel.hidden = true
+    backdrop.hidden = true
+    body.replaceChildren()
+    if (restore) restore()
+    restore = null
+  }
+
+  const onKey = (event) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || panel.hidden) return
+    event.preventDefault()
+    hide()
+  }
+  window.addEventListener('keydown', onKey)
+
+  return {
+    open(row) {
+      if (panel.hidden) restore = rememberFocus()
+      current = { id: row.id, detail: null, session: null, messages: [], busy: false }
+      title.textContent = row.name
+      meta.textContent = row.sourceLabel
+      backdrop.hidden = false
+      panel.hidden = false
+      error.hidden = true
+      render()
+      load(row.id)
+      close.focus({ preventScroll: true })
+    },
+    destroy() {
+      request++
+      window.removeEventListener('keydown', onKey)
+      backdrop.remove()
+      panel.remove()
+    },
+  }
 }
 
 function pluginGrid(rows) {
@@ -519,6 +684,7 @@ function extensionPage(container, params, config) {
   let menu = null
   setTitle(config.title)
   const shell = pageShell(container, { title: config.title, intro: config.intro })
+  if (config.actions) shell.actions.append(...config.actions)
   const resource = createResource(() => `${config.api}?${apiQuery({ account: query.get('account') })}`, render)
   function section(title, note, extra, content) {
     return el('section', { class: 'ext-section' }, el('div', { class: 'ext-head' }, el('div', { class: 'ext-heading' }, el('h2', { class: 'ext-title' }, title), el('p', { class: 'meta' }, note)), extra), content)
@@ -559,6 +725,7 @@ function extensionPage(container, params, config) {
       query = next
       resource.load()
     },
+    reload: () => resource.load({ silent: true }),
     destroy() {
       resource.cancel()
       if (menu) menu.close()
@@ -567,7 +734,8 @@ function extensionPage(container, params, config) {
 }
 
 export function skillsPage(container, params) {
-  return extensionPage(container, params, {
+  const panel = createSkillPanel(() => page.reload())
+  const page = extensionPage(container, params, {
     view: 'skills',
     title: 'Skills',
     intro: 'Every skill Claude Code can use, how often you used it, and how many tokens it takes. Claude Code adds the name and description of each skill to every conversation.',
@@ -576,22 +744,308 @@ export function skillsPage(container, params) {
     localNote: 'Your own skills, and the skills that come with your plugins.',
     localEmpty: 'No skills in your Claude folders yet.',
     syncedNote: 'Skills from your claude.ai account. Claude Code keeps a copy on this computer.',
-    list: skillsTable,
+    list: (rows) => skillCards(rows, panel.open),
   })
+  return {
+    update: page.update,
+    destroy() {
+      page.destroy()
+      panel.destroy()
+    },
+  }
+}
+
+function marketCards(rows, open) {
+  return el(
+    'div',
+    { class: 'plugin-grid' },
+    rows.map((row) =>
+      el(
+        'button',
+        { class: 'plugin-card skill-card', type: 'button', 'data-focus': `market-${row.id}`, onclick: () => open(row.id) },
+        el('span', { class: 'plugin-head' }, el('span', { class: 'plugin-name' }, row.title), row.stateLabel ? badge(row.on ? 'working' : 'stopped', row.stateLabel) : null),
+        row.description ? el('span', { class: 'plugin-desc' }, row.description) : null,
+        el('span', { class: 'meta' }, row.metaLabel),
+        row.statsLabel ? el('span', { class: 'plugin-parts' }, row.statsLabel) : null,
+      ),
+    ),
+  )
+}
+
+function createMarketPanel(onChanged) {
+  const query = { q: '', category: '', sort: 'installs', page: 1 }
+  let view = 'browse'
+  let detail = null
+  let detailRequest = 0
+  let notice = null
+  let busy = null
+  const meta = el('p', { class: 'meta' })
+  const title = el('h2', { class: 'slideover-title', id: 'market-title' }, 'Marketplace')
+  const switchButton = el('button', { class: 'button small', type: 'button', 'data-focus': 'market-switch', onclick: () => show(view === 'sources' ? 'browse' : 'sources') }, 'Marketplaces')
+  const close = el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close the marketplace', onclick: () => hide() }, icon('close'))
+  const body = el('div', { class: 'slideover-body scroll-area' })
+  const backdrop = el('div', { class: 'slideover-backdrop', hidden: true, onclick: () => hide() })
+  let restore = null
+  const panel = el('aside', { class: 'slideover market-panel', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'market-title', hidden: true }, el('div', { class: 'slideover-head' }, el('div', { class: 'slideover-heading' }, meta, title), el('div', { class: 'market-head-actions' }, switchButton, close)), body)
+  document.body.append(backdrop, panel)
+
+  const reload = () => {
+    query.page = 1
+    list.load()
+  }
+  const search = searchInput('Search plugins', '', (value) => {
+    query.q = value
+    reload()
+  })
+  const categoryHolder = el('div', { class: 'menu' })
+  const sortHolder = el('div', { class: 'menu' })
+  const categoryMenu = createMenu(categoryHolder, {
+    label: 'Category',
+    onSelect: (key) => {
+      query.category = key === 'all' ? '' : key
+      reload()
+    },
+  })
+  const sortMenu = createMenu(sortHolder, {
+    label: 'Sort plugins',
+    align: 'end',
+    onSelect: (key) => {
+      query.sort = key
+      reload()
+    },
+  })
+  const browseNotice = el('div')
+  const results = el('div', { class: 'market-results' })
+  const browseView = el('div', { class: 'market-view' }, el('div', { class: 'toolbar' }, search.node, categoryHolder, sortHolder), browseNotice, results)
+  const sourceInput = el('input', { class: 'input', type: 'text', placeholder: 'owner/repo, a URL or a folder path', 'aria-label': 'Marketplace to add', autocomplete: 'off', spellcheck: 'false' })
+  const addForm = el(
+    'form',
+    {
+      class: 'market-add',
+      onsubmit: (event) => {
+        event.preventDefault()
+        if (sourceInput.value.trim()) run({ action: 'marketplace-add', source: sourceInput.value.trim() })
+      },
+    },
+    sourceInput,
+    el('button', { class: 'button primary', type: 'submit' }, 'Add marketplace'),
+  )
+  const list = createResource(() => `/api/marketplace?${apiQuery({ q: query.q, category: query.category, sort: query.sort, page: query.page > 1 ? String(query.page) : null })}`, () => {
+    if (!panel.hidden) render()
+  })
+
+  function noticeNode() {
+    if (!notice) return null
+    if (notice.tone === 'busy') return el('p', { class: 'live-line' }, spinner(), el('span', { class: 'live-text' }, el('span', { class: 'live-label' }, notice.text)))
+    return el('p', { class: `market-notice is-${notice.tone}`, role: notice.tone === 'error' ? 'alert' : 'status' }, notice.text)
+  }
+
+  async function run(payload) {
+    if (busy) return
+    if ((payload.action === 'uninstall' || payload.action === 'marketplace-remove') && !window.confirm(payload.action === 'uninstall' ? 'Uninstall this plugin from Claude Code?' : `Remove the ${payload.name} marketplace from Claude Code?`)) return
+    busy = payload.action
+    notice = { tone: 'busy', text: 'Claude Code is working on it' }
+    render()
+    try {
+      const result = await postJson('/api/marketplace/action', payload)
+      notice = { tone: 'ok', text: result.message }
+      if (payload.action === 'marketplace-add') sourceInput.value = ''
+      onChanged()
+    } catch (error) {
+      notice = { tone: 'error', text: error.message }
+    }
+    busy = null
+    if (view === 'detail' && detail && !detail.error) await loadDetail(detail.id, true)
+    await list.load({ silent: true })
+    render()
+  }
+
+  function actionButton(label, action, primary) {
+    return el('button', { class: primary ? 'button primary' : 'button', type: 'button', disabled: Boolean(busy), 'data-focus': `act-${action}`, onclick: () => run({ action, id: detail.id }) }, label)
+  }
+
+  function renderBrowse() {
+    if (body.firstChild !== browseView) body.replaceChildren(browseView)
+    browseNotice.replaceChildren(...[noticeNode()].filter(Boolean))
+    const state = list.state
+    const data = state.data
+    const categories = data ? data.categories : []
+    const category = categories.find((entry) => entry.key === query.category)
+    categoryMenu.render(category ? category.label : 'All categories', [{ key: 'all', label: 'All categories' }, ...categories], query.category || 'all')
+    sortMenu.render(MARKET_SORTS.find((entry) => entry.key === query.sort).label, MARKET_SORTS, query.sort)
+    results.classList.toggle('is-refreshing', state.status === 'refreshing')
+    if (state.status === 'loading' || (state.status === 'refreshing' && !data)) return results.replaceChildren(linesSkeleton(6))
+    if (state.status === 'error') return results.replaceChildren(errorBlock('Could not load the marketplace', state.error, () => list.load()))
+    if (!data.rows.length) return results.replaceChildren(stateBlock({ title: 'No plugins match', text: query.q ? `Nothing matches “${query.q}”.` : 'No plugins in this category.' }))
+    keepFocus(results, () =>
+      results.replaceChildren(
+        marketCards(data.rows, (id) => openDetail(id)),
+        pager(data, (page) => {
+          query.page = page
+          list.load()
+          body.scrollTop = 0
+        }),
+      ),
+    )
+  }
+
+  function renderDetail() {
+    const back = el('button', { class: 'button small market-back', type: 'button', 'data-focus': 'market-back', onclick: () => show('browse') }, icon('back'), 'All plugins')
+    if (!detail) return body.replaceChildren(back, linesSkeleton(6))
+    if (detail.error) return body.replaceChildren(back, errorBlock('Could not load this plugin', detail.error, () => loadDetail(detail.id)))
+    const actions = detail.installed ? [detail.on ? actionButton('Turn off', 'disable') : actionButton('Turn on', 'enable', true), actionButton('Uninstall', 'uninstall')] : [actionButton('Install', 'install', true)]
+    keepFocus(body, () =>
+      body.replaceChildren(
+        back,
+        el(
+          'div',
+          { class: 'market-detail' },
+          el('div', { class: 'market-title-row' }, el('h3', { class: 'market-name' }, detail.title), detail.stateLabel ? badge(detail.on ? 'working' : 'stopped', detail.stateLabel) : null),
+          el('p', { class: 'meta' }, detail.metaLabel),
+          detail.description ? el('p', { class: 'market-desc' }, detail.description) : null,
+          el('div', { class: 'market-actions' }, ...actions, detail.homepage ? el('a', { class: 'text-link', href: detail.homepage, target: '_blank', rel: 'noopener noreferrer' }, 'Homepage') : null),
+          noticeNode(),
+          detail.facts.length ? el('dl', { class: 'facts' }, detail.facts.map(([label, value]) => fact(label, value))) : null,
+          detail.groups.map(([label, names]) => el('section', { class: 'market-group' }, el('h4', { class: 'market-group-title' }, `${label} (${names.length})`), el('ul', { class: 'market-chips' }, names.map((name) => el('li', null, name))))),
+        ),
+      ),
+    )
+  }
+
+  function renderSources() {
+    const data = list.state.data
+    keepFocus(body, () =>
+      body.replaceChildren(
+        ...[
+          noticeNode(),
+          data
+            ? el(
+                'ul',
+                { class: 'folder-list' },
+                data.markets.map((market) =>
+                  el(
+                    'li',
+                    { class: 'folder-row market-source' },
+                    el('span', { class: 'market-source-main' }, el('span', { class: 'market-source-name' }, market.name), el('span', { class: 'meta' }, joinMeta([market.sourceLabel, market.countLabel, market.updatedLabel]))),
+                    el(
+                      'span',
+                      { class: 'market-actions' },
+                      el('button', { class: 'button small', type: 'button', disabled: Boolean(busy), 'data-focus': `update-${market.name}`, onclick: () => run({ action: 'marketplace-update', name: market.name }) }, 'Update'),
+                      el('button', { class: 'button small', type: 'button', disabled: Boolean(busy), 'data-focus': `remove-${market.name}`, onclick: () => run({ action: 'marketplace-remove', name: market.name }) }, 'Remove'),
+                    ),
+                  ),
+                ),
+              )
+            : linesSkeleton(3),
+          addForm,
+        ].filter(Boolean),
+      ),
+    )
+  }
+
+  function render() {
+    const data = list.state.data
+    meta.textContent = data ? data.summaryLabel : 'Plugins from your marketplaces'
+    switchButton.textContent = view === 'sources' ? 'Plugins' : 'Marketplaces'
+    switchButton.hidden = view === 'detail'
+    title.textContent = view === 'sources' ? 'Marketplaces' : 'Marketplace'
+    if (view === 'detail') return renderDetail()
+    if (view === 'sources') return renderSources()
+    return renderBrowse()
+  }
+
+  async function loadDetail(id, silent) {
+    const mine = ++detailRequest
+    if (!silent) {
+      detail = null
+      render()
+    }
+    try {
+      const data = await getJson(`/api/marketplace/plugin?${new URLSearchParams({ id })}`)
+      if (mine === detailRequest) detail = data
+    } catch (error) {
+      if (mine === detailRequest) detail = { id, error: error.message }
+    }
+    if (mine === detailRequest && !silent) render()
+  }
+
+  function openDetail(id) {
+    view = 'detail'
+    notice = null
+    body.scrollTop = 0
+    loadDetail(id)
+  }
+
+  function show(next) {
+    view = next
+    notice = null
+    detailRequest++
+    render()
+  }
+
+  function hide() {
+    if (panel.hidden) return
+    panel.hidden = true
+    backdrop.hidden = true
+    categoryMenu.close()
+    sortMenu.close()
+    if (restore) restore()
+    restore = null
+  }
+
+  const onKey = (event) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || panel.hidden) return
+    event.preventDefault()
+    if (view === 'detail') show('browse')
+    else hide()
+  }
+  window.addEventListener('keydown', onKey)
+
+  return {
+    open() {
+      if (panel.hidden) restore = rememberFocus()
+      view = 'browse'
+      notice = null
+      backdrop.hidden = false
+      panel.hidden = false
+      render()
+      list.load({ silent: Boolean(list.state.data) })
+      if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) search.node.focus({ preventScroll: true })
+      else close.focus({ preventScroll: true })
+    },
+    destroy() {
+      list.cancel()
+      search.stop()
+      categoryMenu.close()
+      sortMenu.close()
+      window.removeEventListener('keydown', onKey)
+      backdrop.remove()
+      panel.remove()
+    },
+  }
 }
 
 export function pluginsPage(container, params) {
-  return extensionPage(container, params, {
+  const market = createMarketPanel(() => page.reload())
+  const page = extensionPage(container, params, {
     view: 'plugins',
     title: 'Plugins',
-    intro: 'Plugins added to Claude Code and what each one brings. Turn them on or off in Claude Code with /plugin.',
+    intro: 'Plugins added to Claude Code and what each one brings. Find more, and install them, in the Marketplace.',
     noun: 'plugins',
     api: '/api/plugins',
-    localNote: 'Installed from a marketplace with /plugin.',
-    localEmpty: 'No plugins installed. Add one in Claude Code with /plugin.',
+    localNote: 'Installed from a marketplace.',
+    localEmpty: 'No plugins installed yet. Open the Marketplace to add one.',
     syncedNote: 'Plugins from your claude.ai account.',
     list: pluginGrid,
+    actions: [button('Marketplace', () => market.open(), 'primary')],
   })
+  return {
+    update: page.update,
+    destroy() {
+      page.destroy()
+      market.destroy()
+    },
+  }
 }
 
 function settingsSection(title, intro, content) {

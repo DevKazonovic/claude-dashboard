@@ -2,7 +2,6 @@ import {
   el,
   icon,
   link,
-  urlFor,
   navigate,
   setTitle,
   getJson,
@@ -27,6 +26,7 @@ import {
 } from './ui.js'
 import { renderMarkdown } from './markdown.js'
 import { createUsage } from './usage.js'
+import { createAgentOffice } from './office.js'
 
 const LIVE_MS = 3000
 const IDLE_MS = 15000
@@ -189,11 +189,17 @@ function createConversation(container, target, initialParams, options = {}) {
   const slideover = el('aside', { class: embedded ? 'slideover agent-slideover' : 'slideover', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': slideTitleId, hidden: !embedded }, el('div', { class: 'slideover-head' }, slideBack, el('div', { class: 'slideover-heading' }, slideTitle, slideMeta), slideClose), agentPane, slideBody)
   const slideBackdrop = el('div', { class: 'slideover-backdrop', hidden: !embedded, onclick: () => (embedded ? options.onClose() : closeDetail()) })
 
-  let crumbsHolder = null
   let detailsButton = null
   let foldButton = null
   let vscodeButton = null
   let terminalButton = null
+  let copyResume = null
+  let officeButton = null
+  let officeHolder = null
+  let officeView = null
+  let officeOn = false
+  let officeOpenedHere = false
+  let tools = null
   let openNote = null
   let openNoteTimer = null
   let composer = null
@@ -209,21 +215,22 @@ function createConversation(container, target, initialParams, options = {}) {
   let layout = null
   if (embedded) container.append(slideBackdrop, slideover)
   else {
-    const bar = el('div', { class: 'chat-bar' })
     composer = buildComposer()
     bottom = el('div', { class: 'chat-bottom', hidden: true }, el('div', { class: 'chat-wrap' }, composer.form))
-    const pane = el('div', { class: 'chat-pane' }, el('div', { class: 'chat-top' }, el('div', { class: 'chat-wrap' }, bar, head, notice)), chatScroll, bottom)
+    officeHolder = el('div', { class: 'office-holder', hidden: true })
+    const pane = el('div', { class: 'chat-pane' }, el('div', { class: 'chat-top' }, el('div', { class: 'chat-wrap' }, head, notice)), chatScroll, officeHolder, bottom)
     sideBody = el('div', { class: 'side-body' })
     sideClose = el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close details', onclick: () => closeSide(true) }, icon('close'))
     side = el('aside', { class: 'side scroll-area', id: `side-${target.id}`, 'aria-label': 'Details' }, el('div', { class: 'side-head' }, el('h2', { class: 'side-title' }, 'Details'), sideClose), sideBody)
     sideBackdrop = el('div', { class: 'side-backdrop', hidden: true, onclick: () => closeSide(false) })
-    crumbsHolder = el('div', { class: 'chat-crumbs' })
     detailsButton = el('button', { class: 'button small details-button', type: 'button', 'aria-controls': side.id, 'data-focus': 'details-button', hidden: true, onclick: () => openSide() })
-    foldButton = el('button', { class: 'button small ghost', type: 'button', 'data-focus': 'fold-all', hidden: true, onclick: () => toggleFoldAll() })
-    vscodeButton = el('button', { class: 'button small', type: 'button', 'data-focus': 'open-vscode', hidden: true, onclick: () => openIn('vscode') }, 'Open in VS Code')
-    terminalButton = el('button', { class: 'button small', type: 'button', 'data-focus': 'open-terminal', hidden: true, onclick: () => openIn('terminal') }, 'Open in Terminal')
+    foldButton = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'fold-all', hidden: true, onclick: () => toggleFoldAll() })
+    vscodeButton = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'open-vscode', hidden: true, onclick: () => openIn('vscode') })
+    terminalButton = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'open-terminal', hidden: true, onclick: () => openIn('terminal') })
+    copyResume = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'copy-resume', 'aria-label': 'Copy the resume command', title: 'Copy the resume command', hidden: true, onclick: () => copyResumeCommand() }, icon('copy'))
+    officeButton = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'agent-office', hidden: true, onclick: () => toggleOffice() })
+    tools = el('span', { class: 'chat-tools', role: 'toolbar', 'aria-label': 'Conversation actions' }, officeButton, foldButton, vscodeButton, terminalButton, copyResume, detailsButton)
     openNote = el('p', { class: 'open-note', role: 'status', hidden: true })
-    bar.append(crumbsHolder, el('div', { class: 'chat-bar-actions' }, foldButton, vscodeButton, terminalButton, detailsButton))
     notice.after(openNote)
     accountNote = el('p', { class: 'account-note', hidden: true })
     usageHolder = el('div', { class: 'chat-usage' })
@@ -421,6 +428,8 @@ function createConversation(container, target, initialParams, options = {}) {
   }
 
   async function openIn(where) {
+    const opener = state.status === 'ready' ? state.data.opener : null
+    if (state.opening || !opener || !opener.available) return
     state.opening = where
     renderOpener()
     try {
@@ -431,6 +440,73 @@ function createConversation(container, target, initialParams, options = {}) {
     }
     state.opening = null
     renderOpener()
+  }
+
+  function toggleOffice() {
+    if (!officeOn) {
+      officeOpenedHere = true
+      navigate(href({ office: '1' }))
+    } else if (officeOpenedHere) window.history.back()
+    else navigate(href({}), { replace: true })
+  }
+
+  function officeRooms(data) {
+    const mood = data.status === 'busy' ? 'working' : data.status
+    const desk = (agent, team) => ({
+      key: agent.id,
+      agentId: agent.id,
+      label: agent.description || agent.phase || agent.typeLabel,
+      status: agent.status,
+      tool: agent.activity ? agent.activity.label : null,
+      detail: [team, agent.typeLabel, agent.statusLabel, agent.tokensLabel].filter(Boolean).join(' · '),
+      startedAt: agent.startedAt || agent.lastActiveAt || 0,
+    })
+    const byStart = (a, b) => a.startedAt - b.startedAt
+    const groups = data.agentGroups || []
+    const plain = groups.find((group) => group.key === 'subagents')
+    return [
+      { key: 'main', title: 'Main room', subtitle: plain ? plain.subtitle : 'No subagents', boss: { key: 'main-agent', label: 'Main agent', status: mood, tool: data.activity ? data.activity.label : null, detail: [data.statusLabel, data.tokensLabel].filter(Boolean).join(' · ') }, desks: plain ? plain.agents.map((agent) => desk(agent)).sort(byStart) : [] },
+      ...groups
+        .filter((group) => group.key !== 'subagents')
+        .map((group) => {
+          const name = group.title.replace(/^Workflow /, '')
+          return { key: group.key, title: name, subtitle: group.subtitle, boss: null, desks: group.agents.map((agent) => desk(agent, `Workflow ${name}`)).sort(byStart) }
+        }),
+    ]
+  }
+
+  function setOffice(on) {
+    if (on === officeOn) return
+    officeOn = on
+    chatScroll.hidden = on
+    officeHolder.hidden = !on
+    if (bottom) bottom.classList.toggle('is-office', on)
+    if (on) {
+      officeView = createAgentOffice(officeHolder, {
+        storeKey: 'claude-dashboard-office-finished-chat',
+        showFinished: true,
+        onOpen: (desk) => {
+          if (!desk.agentId) return toggleOffice()
+          agentOpenedHere = true
+          navigate(href({ agent: desk.agentId, office: '1' }))
+        },
+      })
+      if (state.status === 'ready') officeView.update(officeRooms(state.data))
+    } else {
+      officeOpenedHere = false
+      if (officeView) officeView.destroy()
+      officeView = null
+    }
+    renderOpener()
+  }
+
+  async function copyResumeCommand() {
+    try {
+      await navigator.clipboard.writeText(state.data.resumeCommand)
+      showOpenNote('Copied the resume command. Paste it in any terminal.', false)
+    } catch {
+      showOpenNote(`Copy failed. The command is: ${state.data.resumeCommand}`, true)
+    }
   }
 
   function showOpenNote(text, failed, sticky) {
@@ -445,15 +521,27 @@ function createConversation(container, target, initialParams, options = {}) {
     if (!foldButton) return
     const ready = state.status === 'ready'
     foldButton.hidden = !ready
-    foldButton.textContent = state.repliesCollapsed ? 'Expand responses' : 'Collapse responses'
+    const foldLabel = state.repliesCollapsed ? 'Expand responses' : 'Collapse responses'
+    foldButton.replaceChildren(icon(state.repliesCollapsed ? 'chevrons' : 'fold'))
+    foldButton.setAttribute('aria-label', foldLabel)
+    foldButton.title = foldLabel
     foldButton.setAttribute('aria-pressed', String(state.repliesCollapsed))
     const opener = ready ? state.data.opener : null
-    for (const [button, where, label] of [[vscodeButton, 'vscode', 'Open in VS Code'], [terminalButton, 'terminal', 'Open in Terminal']]) {
+    for (const [button, where, label, glyph] of [[vscodeButton, 'vscode', 'Open in VS Code', 'code'], [terminalButton, 'terminal', 'Open in Terminal', 'terminal']]) {
+      const text = state.opening === where ? `${label}: opening` : opener && !opener.available && opener.note ? `${label}: ${opener.note}` : label
       button.hidden = !opener
-      button.disabled = !opener || !opener.available || Boolean(state.opening)
-      button.title = opener && opener.note ? opener.note : ''
-      button.textContent = state.opening === where ? 'Opening' : label
+      button.setAttribute('aria-disabled', String(!opener || !opener.available || Boolean(state.opening)))
+      button.setAttribute('aria-label', text)
+      button.title = text
+      button.replaceChildren(state.opening === where ? spinner() : icon(glyph))
     }
+    copyResume.hidden = !(ready && state.data.resumeCommand)
+    const officeLabel = officeOn ? 'Back to the chat' : 'Agent office'
+    officeButton.hidden = !(ready && state.data.agentGroups.length)
+    officeButton.replaceChildren(icon(officeOn ? 'chat' : 'office'))
+    officeButton.setAttribute('aria-label', officeLabel)
+    officeButton.setAttribute('aria-pressed', String(officeOn))
+    officeButton.title = officeLabel
   }
 
   function drawerMode() {
@@ -900,7 +988,6 @@ function createConversation(container, target, initialParams, options = {}) {
   function renderFrame() {
     if (state.status === 'loading') {
       if (!embedded) setTitle('Conversation')
-      if (crumbsHolder) crumbsHolder.replaceChildren()
       renderAccount()
       renderSlideHead()
       head.replaceChildren(skeleton('title-line w-60'), skeleton('line w-40'))
@@ -911,7 +998,6 @@ function createConversation(container, target, initialParams, options = {}) {
     }
     if (state.status === 'error') {
       if (!embedded) setTitle('Conversation')
-      if (crumbsHolder) crumbsHolder.replaceChildren(crumbs(null))
       renderAccount()
       renderSlideHead()
       head.replaceChildren()
@@ -932,7 +1018,6 @@ function createConversation(container, target, initialParams, options = {}) {
     }
     chatBody.hidden = false
     if (!embedded) setTitle(state.data.title)
-    if (crumbsHolder) keepFocus(crumbsHolder, () => crumbsHolder.replaceChildren(crumbs(state.data)))
     if (detailsButton) {
       detailsButton.hidden = false
       detailsButton.textContent = `Details · ${state.data.tokensLabel}`
@@ -940,6 +1025,7 @@ function createConversation(container, target, initialParams, options = {}) {
     renderAccount()
     renderSlideHead()
     keepFocus(head, () => head.replaceChildren(...(embedded ? agentSummary(state.data) : headContent(state.data))))
+    if (officeView) officeView.update(officeRooms(state.data))
     renderNotice()
     renderSide()
     renderWorking()
@@ -1073,15 +1159,9 @@ function createConversation(container, target, initialParams, options = {}) {
     }
   }
 
-  function crumbs(data) {
-    const parts = [link(urlFor({ view: 'conversations' }), { class: 'crumb' }, 'Conversations')]
-    if (data && data.project) parts.push(el('span', { class: 'crumb-sep', 'aria-hidden': 'true' }, '/'), link(urlFor({ view: 'conversations', project: data.project }), { class: 'crumb', 'data-focus': 'crumb-project' }, data.projectName))
-    return el('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' }, parts)
-  }
-
   function headContent(data) {
     const badges = [badge(data.status, data.statusLabel), data.whereLabel ? badge('neutral', data.whereLabel) : null]
-    return [el('h1', { class: 'chat-title' }, data.title), el('div', { class: 'convo-meta' }, el('span', { class: 'badges' }, badges), el('span', null, joinMeta([data.projectLabel, data.modelsLabel, data.tokensLabel])))]
+    return [el('h1', { class: 'chat-title' }, data.title), el('div', { class: 'convo-meta' }, el('span', { class: 'badges' }, badges), el('span', null, joinMeta([data.projectLabel, data.modelsLabel, data.tokensLabel])), tools)]
   }
 
   function turnNode(turn) {
@@ -1382,10 +1462,12 @@ function createConversation(container, target, initialParams, options = {}) {
   renderFrame()
   load(false)
   const stopLive = live.subscribe(renderLive)
+  if (!embedded && initialParams.get('office') === '1') setOffice(true)
   if (!embedded && initialParams.get('agent')) openAgent(initialParams.get('agent'), initialParams)
 
   return {
     update(params) {
+      if (!embedded) setOffice(params.get('office') === '1')
       const agentId = embedded ? null : params.get('agent')
       if (agentId) {
         hideDetail()
@@ -1403,7 +1485,7 @@ function createConversation(container, target, initialParams, options = {}) {
       else if (embedded) options.onClose()
     },
     depth() {
-      return (state.detailOpenedHere ? 1 : 0) + (agentView && agentOpenedHere ? 1 + agentView.depth() : 0)
+      return (state.detailOpenedHere ? 1 : 0) + (agentView && agentOpenedHere ? 1 + agentView.depth() : 0) + (officeOn && officeOpenedHere ? 1 : 0)
     },
     destroy() {
       destroyed = true
@@ -1419,6 +1501,7 @@ function createConversation(container, target, initialParams, options = {}) {
       }
       if (agentView) agentView.destroy()
       agentView = null
+      if (officeView) officeView.destroy()
       document.removeEventListener('keydown', onKey)
     },
   }

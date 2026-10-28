@@ -1,7 +1,7 @@
 import { el, icon, navigate, urlFor, setTitle, createResource, badge, joinMeta, pager, errorBlock, scanBlock, linesSkeleton, keepFocus } from './ui.js'
 import { conversationView } from './conversation.js'
 
-export const CHAT_KEYS = ['chat', 'agent', 'detail']
+export const CHAT_KEYS = ['chat', 'agent', 'detail', 'office']
 let openedHere = false
 let projectOpener = null
 
@@ -17,9 +17,9 @@ function pageHref(extra) {
   return text ? `${window.location.pathname}?${text}` : window.location.pathname
 }
 
-export function openChat(id, agent) {
+export function openChat(id, agent, extra) {
   openedHere = true
-  navigate(pageHref({ chat: id, agent }))
+  navigate(pageHref({ chat: id, agent, ...extra }))
 }
 
 export function openProject(project) {
@@ -79,8 +79,9 @@ export function createPanels() {
   const projectTitle = el('h2', { class: 'slideover-title', id: 'project-panel-title' })
   const projectClose = el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close the project', onclick: () => closeProject() }, icon('close'))
   const projectBody = el('div', { class: 'slideover-body scroll-area' })
-  const projectPanel = el('aside', { class: 'slideover project-panel', role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'project-panel-title', hidden: true }, el('div', { class: 'slideover-head' }, el('div', { class: 'slideover-heading' }, projectMeta, projectTitle), projectClose), projectBody)
-  document.body.append(projectPanel, chatBackdrop, chatPanel)
+  const projectBackdrop = el('div', { class: 'slideover-backdrop', hidden: true, onclick: () => closeProject() })
+  const projectPanel = el('aside', { class: 'slideover project-panel', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'project-panel-title', hidden: true }, el('div', { class: 'slideover-head' }, el('div', { class: 'slideover-heading' }, projectMeta, projectTitle), projectClose), projectBody)
+  document.body.append(projectBackdrop, projectPanel, chatBackdrop, chatPanel)
 
   const projectResource = createResource(() => `/api/sessions?${new URLSearchParams({ project, page: String(page) })}`, renderProject)
 
@@ -127,6 +128,7 @@ export function createPanels() {
     page = 1
     projectTitle.textContent = value
     projectMeta.textContent = 'Project'
+    projectBackdrop.hidden = false
     projectPanel.hidden = false
     projectResource.state.data = null
     projectResource.load()
@@ -136,6 +138,7 @@ export function createPanels() {
   function closeProject() {
     if (projectPanel.hidden) return
     projectResource.cancel()
+    projectBackdrop.hidden = true
     projectPanel.hidden = true
     projectBody.replaceChildren()
     if (projectReturn && document.contains(projectReturn)) projectReturn.focus({ preventScroll: true })
