@@ -36,6 +36,9 @@ const TASK_STOPPED_TEXT = 'Successfully stopped task: '
 const TASK_STOPPED = /Successfully stopped task: ([A-Za-z0-9]+)/g
 const TOTAL_KEYS = ['input', 'output', 'cacheRead', 'cacheWrite', 'webSearches', 'cost', 'messages', 'unpriced', 'inputCost', 'outputCost', 'cacheReadCost', 'cacheWriteCost', 'searchCost']
 const AGENT_TOOLS = new Set(['Agent', 'Task'])
+const SKILL_TOOL = 'Skill'
+const COMMAND_TAG = '<command-name>'
+const COMMAND_NAME = /<command-name>\/?([^<\s]+)<\/command-name>/
 
 function own(text) {
   return Buffer.from(text, 'utf8').toString('utf8')
@@ -134,6 +137,7 @@ function freshData() {
     taskStatus: new Map(),
     taskStatusById: new Map(),
     workflowTasks: new Map(),
+    skillUses: new Map(),
   }
 }
 
@@ -167,6 +171,7 @@ function handleAssistant(data, line, kind) {
       if (!block || block.type !== 'tool_use' || !block.id) continue
       if (AGENT_TOOLS.has(block.name)) data.agentCalls.set(block.id, block.id)
       if (block.name === FINAL_TOOL) delivered = true
+      if (block.name === SKILL_TOOL && block.input && typeof block.input.skill === 'string') data.skillUses.set(block.id, { name: block.input.skill, at: record.timestamp ? Date.parse(record.timestamp) : NaN })
       data.openTools.set(block.id, { block, cwd: typeof record.cwd === 'string' ? record.cwd : null, at: record.timestamp ? Date.parse(record.timestamp) : NaN })
     }
   }
@@ -255,6 +260,14 @@ function readPrompt(data, line) {
   data.promptText = own(`${data.promptText}\n${trimmed.slice(0, PROMPT_CLIP).toLowerCase()}`.slice(0, PROMPT_TEXT_LIMIT))
 }
 
+function readCommand(data, line) {
+  const record = parseJson(line)
+  if (!record || record.type !== 'user' || !record.uuid || !record.message || typeof record.message.content !== 'string') return
+  if (!record.message.content.trimStart().startsWith('<command-')) return
+  const match = COMMAND_NAME.exec(record.message.content)
+  if (match) data.skillUses.set(record.uuid, { name: own(match[1]), at: record.timestamp ? Date.parse(record.timestamp) : NaN })
+}
+
 function handleMeta(data, line) {
   const record = parseJson(line)
   if (!record) return
@@ -288,6 +301,7 @@ function handleLine(transcript, line) {
   if (transcript.kind === 'main') {
     if (data.promptText.length < PROMPT_TEXT_LIMIT && line.length < PROMPT_LINE_LIMIT && line.includes(USER_LINE) && !line.includes('"tool_use_id":"') && !line.includes(META_FLAG) && !line.includes(SIDECHAIN_FLAG)) readPrompt(data, line)
     if (line.includes(NOTIFICATION_OPEN)) readNotifications(data, line)
+    if (line.length < SMALL_LINE && line.includes(COMMAND_TAG) && line.includes(USER_LINE)) readCommand(data, line)
     if (line.includes('Run ID: wf_')) {
       for (const match of line.matchAll(WORKFLOW_RUN)) data.workflowTasks.set(own(match[2]), own(match[1]))
     }
@@ -701,4 +715,4 @@ function createCollector(options = {}) {
   }
 }
 
-module.exports = { createCollector, createJsonCache, readLines, statSafe, realpathSafe, parseJson, own, emptyTotals, TOTAL_KEYS }
+module.exports = { createCollector, createJsonCache, readLines, readdirSafe, statSafe, realpathSafe, parseJson, own, emptyTotals, TOTAL_KEYS }

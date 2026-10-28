@@ -7,6 +7,18 @@ const SVG = {
   check: '<path d="M20 6 9 17l-5-5"/>',
   close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   back: '<path d="m15 18-6-6 6-6"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  bot: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  flow: '<rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/>',
+  layers: '<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  minus: '<path d="M5 12h14"/>',
+  fit: '<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
+  fold: '<path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/>',
+  code: '<path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/>',
+  terminal: '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
 }
 
 export const RANGE_PRESETS = [
@@ -112,6 +124,13 @@ export function spinner(label) {
   return el('span', label ? { class: 'spinner', role: 'img', 'aria-label': label, title: label } : { class: 'spinner', 'aria-hidden': 'true' }, spinnerText())
 }
 
+export function statusDot(session) {
+  if (!session) return null
+  if (session.status === 'busy') return spinner(session.statusLabel)
+  const tone = session.status === 'waiting' || session.status === 'blocked' ? 'waiting' : 'idle'
+  return el('span', { class: `dot dot-${tone}`, role: 'img', 'aria-label': session.statusLabel, title: session.statusLabel })
+}
+
 export function activityText(activity, extra) {
   const meta = joinMeta([activity.sinceLabel, ...(extra || [])])
   return el(
@@ -134,11 +153,11 @@ export function setTitle(text) {
   if (title) title.textContent = text || APP_NAME
 }
 
-const VIEW_PATHS = { overview: '/overview', live: '/running', conversations: '/conversations', projects: '/projects', settings: '/settings' }
+const VIEW_PATHS = { overview: '/overview', conversations: '/conversations', projects: '/projects', skills: '/skills', plugins: '/plugins', analytics: '/analytics', settings: '/settings' }
 
 export function urlFor({ view, session, agent, ...params }) {
   const search = new URLSearchParams()
-  if (session && agent) search.set('agent', agent)
+  if (agent) search.set('agent', agent)
   for (const [key, value] of Object.entries(params)) {
     if (value === null || value === undefined || value === '') continue
     search.set(key, String(value))

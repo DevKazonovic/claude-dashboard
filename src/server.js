@@ -6,6 +6,9 @@ const { createCollector } = require('./collector')
 const { createTimelines } = require('./timeline')
 const { createRuns } = require('./runs')
 const { createAccounts } = require('./accounts')
+const { createExtensions } = require('./extensions')
+const { createMarketplace } = require('./marketplace')
+const { createOps } = require('./ops')
 const { buildLive, buildHistory, buildOverview, buildProjects, buildRecents, scanDto } = require('./views')
 const { buildConversation, buildAgent, buildChat, buildTurn, sendMessage, stopMessage, openConversation, RequestError } = require('./conversation')
 const format = require('./format')
@@ -21,14 +24,16 @@ const SCRIPT = 'text/javascript; charset=utf-8'
 const PAGE = ['index.html', 'text/html; charset=utf-8']
 const APP_PATHS = [
   /^\/overview\/?$/,
-  /^\/running\/?$/,
   /^\/conversations\/?$/,
   /^\/projects\/?$/,
+  /^\/skills\/?$/,
+  /^\/plugins\/?$/,
+  /^\/analytics\/?$/,
   /^\/settings\/?$/,
-  /^\/chat\/[A-Za-z0-9_-]{6,100}\/?$/,
 ]
+const CHAT_PATH = /^\/chat\/([A-Za-z0-9_-]{6,100})\/?$/
 const AGENT_PATH = /^\/chat\/([A-Za-z0-9_-]{6,100})\/agents\/([A-Za-z0-9_-]{1,100})\/?$/
-const LEGACY_VIEWS = { overview: '/overview', live: '/running', conversations: '/conversations', projects: '/projects' }
+const LEGACY_VIEWS = { overview: '/analytics', live: '/overview', conversations: '/conversations', projects: '/projects' }
 const LEGACY_LIST_PARAMS = ['range', 'from', 'to', 'q', 'sort', 'dir', 'page', 'project']
 const LIST_PATHS = ['/conversations', '/projects']
 const SESSION_ID = /^[A-Za-z0-9_-]{6,100}$/
@@ -42,6 +47,13 @@ const STATIC_FILES = {
   '/markdown.js': ['markdown.js', SCRIPT],
   '/sidebar.js': ['sidebar.js', SCRIPT],
   '/pages.js': ['pages.js', SCRIPT],
+  '/flow.js': ['flow.js', SCRIPT],
+  '/panels.js': ['panels.js', SCRIPT],
+  '/ops.js': ['ops.js', SCRIPT],
+  '/ops3d.js': ['ops3d.js', SCRIPT],
+  '/vendor/three.core.min.js': ['vendor/three.core.min.js', SCRIPT],
+  '/vendor/three.module.min.js': ['vendor/three.module.min.js', SCRIPT],
+  '/vendor/CSS3DRenderer.js': ['vendor/CSS3DRenderer.js', SCRIPT],
   '/conversation.js': ['conversation.js', SCRIPT],
   '/usage.js': ['usage.js', SCRIPT],
 }
@@ -51,7 +63,7 @@ const HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 }
-const POST_ROUTES = new Set(['/api/send', '/api/stop', '/api/open', '/api/accounts/refresh'])
+const POST_ROUTES = new Set(['/api/send', '/api/stop', '/api/open', '/api/accounts/refresh', '/api/skills/edit', '/api/marketplace/action'])
 const BODY_LIMIT = 256 * 1024
 
 function readBody(req) {
@@ -91,10 +103,10 @@ function legacyTarget(params) {
   const agent = params.get('agent')
   if (session && SESSION_ID.test(session)) {
     const detail = params.get('detail')
-    const query = new URLSearchParams()
+    const query = new URLSearchParams([['chat', session]])
     if (agent && AGENT_ID.test(agent)) query.set('agent', agent)
     if (detail) query.set('detail', detail)
-    return { status: 301, location: withQuery(`/chat/${session}`, query) }
+    return { status: 301, location: withQuery('/overview', query) }
   }
   const view = params.get('view')
   const rest = new URLSearchParams(params)
@@ -125,7 +137,7 @@ function sendJson(res, status, data) {
   send(res, status, JSON.stringify(data), 'application/json; charset=utf-8')
 }
 
-function createHandler(collector, timelines, runs, accounts, port, report) {
+function createHandler(collector, timelines, runs, accounts, extensions, marketplace, ops, port, report) {
   const allowedHosts = new Set([`${HOST}:${port}`, `localhost:${port}`, `[::1]:${port}`])
   return async (req, res) => {
     if (!allowedHosts.has(req.headers.host)) return send(res, 403, 'Forbidden', 'text/plain; charset=utf-8')
@@ -141,6 +153,20 @@ function createHandler(collector, timelines, runs, accounts, port, report) {
         if (!body) return sendJson(res, 400, { error: 'The request body is not valid JSON.' })
         if (url.pathname === '/api/send') return sendJson(res, 200, await sendMessage(collector, runs, body))
         if (url.pathname === '/api/open') return sendJson(res, 200, await openConversation(collector, runs, body))
+        if (url.pathname === '/api/marketplace/action') {
+          try {
+            return sendJson(res, 200, await marketplace.act(body))
+          } catch (error) {
+            return sendJson(res, error.status || 500, { error: error.message })
+          }
+        }
+        if (url.pathname === '/api/skills/edit') {
+          try {
+            return sendJson(res, 200, await extensions.editSkill(body))
+          } catch (error) {
+            return sendJson(res, error.status || 500, { error: error.message })
+          }
+        }
         if (url.pathname === '/api/accounts/refresh') {
           if (typeof body.key !== 'string' || !body.key) return sendJson(res, 400, { error: 'Choose an account to refresh.' })
           try {
@@ -156,11 +182,25 @@ function createHandler(collector, timelines, runs, accounts, port, report) {
         return sendJson(res, 200, { app: APP_ID, pid: process.pid, scan: scanDto(scan), counts: scan.status === 'done' ? await collector.counts() : null })
       }
       if (url.pathname === '/api/live') return sendJson(res, 200, await buildLive(collector, accounts))
+      if (url.pathname === '/api/ops') return sendJson(res, 200, await ops.build(collector))
       if (url.pathname === '/api/sessions') return sendJson(res, 200, await buildHistory(collector, params))
       if (url.pathname === '/api/overview') return sendJson(res, 200, await buildOverview(collector, params))
       if (url.pathname === '/api/projects') return sendJson(res, 200, await buildProjects(collector, params))
       if (url.pathname === '/api/recents') return sendJson(res, 200, await buildRecents(collector, params))
       if (url.pathname === '/api/accounts') return sendJson(res, 200, await accounts.list())
+      if (url.pathname === '/api/skills') return sendJson(res, 200, await extensions.skills(params))
+      if (url.pathname === '/api/plugins') return sendJson(res, 200, await extensions.plugins(params))
+      if (url.pathname === '/api/marketplace') return sendJson(res, 200, await marketplace.list(params))
+      if (url.pathname === '/api/marketplace/plugin') {
+        const plugin = await marketplace.plugin(params)
+        if (!plugin) return sendJson(res, 404, { error: 'This plugin is not in your marketplaces.' })
+        return sendJson(res, 200, plugin)
+      }
+      if (url.pathname === '/api/skill') {
+        const skill = await extensions.skill(params)
+        if (!skill) return sendJson(res, 404, { error: 'This skill was not found on this computer.' })
+        return sendJson(res, 200, skill)
+      }
       if (url.pathname === '/api/settings') return sendJson(res, 200, { folders: await accounts.folders(), scan: scanDto(collector.scanStatus()) })
       if (url.pathname === '/api/session') {
         const session = await buildConversation(collector, timelines, runs, accounts, params)
@@ -183,11 +223,14 @@ function createHandler(collector, timelines, runs, accounts, port, report) {
         return sendJson(res, 200, turn)
       }
       if (url.pathname === '/') return redirect(res, legacyTarget(params))
+      if (/^\/running\/?$/.test(url.pathname)) return redirect(res, { status: 301, location: '/overview' })
       const agentPath = AGENT_PATH.exec(url.pathname)
       if (agentPath) {
-        const query = new URLSearchParams([['agent', agentPath[2]], ...[...params].filter(([key]) => key !== 'agent')])
-        return redirect(res, { status: 301, location: withQuery(`/chat/${agentPath[1]}`, query) })
+        const query = new URLSearchParams([['chat', agentPath[1]], ['agent', agentPath[2]], ...[...params].filter(([key]) => key !== 'agent' && key !== 'chat')])
+        return redirect(res, { status: 301, location: withQuery('/overview', query) })
       }
+      const chatPath = CHAT_PATH.exec(url.pathname)
+      if (chatPath) return redirect(res, { status: 302, location: withQuery('/overview', new URLSearchParams([['chat', chatPath[1]], ...[...params].filter(([key]) => key !== 'chat')])) })
       if (LIST_PATHS.includes(url.pathname) && params.get('sort') === 'cost') {
         params.set('sort', 'tokens')
         return redirect(res, { status: 301, location: withQuery(url.pathname, params) })
@@ -278,6 +321,9 @@ async function start(options) {
   const timelines = createTimelines()
   const runs = createRuns((text, tone) => ui.log(text, tone))
   const accounts = createAccounts(collector)
+  const extensions = createExtensions(collector, accounts)
+  const marketplace = createMarketplace()
+  const ops = createOps()
   await collector.init()
   for (let port = options.port; port < options.port + PORT_ATTEMPTS; port++) {
     const url = `http://${HOST}:${port}/`
@@ -286,7 +332,7 @@ async function start(options) {
       if (options.open) openBrowser(url, ui)
       return
     }
-    const server = http.createServer(createHandler(collector, timelines, runs, accounts, port, (text) => ui.log(text, 'error')))
+    const server = http.createServer(createHandler(collector, timelines, runs, accounts, extensions, marketplace, ops, port, (text) => ui.log(text, 'error')))
     try {
       await listen(server, port)
     } catch (error) {

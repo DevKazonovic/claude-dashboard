@@ -172,6 +172,9 @@ function createAccounts(collector) {
       }
       return folders
     },
+    async signedIn() {
+      return (await load()).map((entry) => ({ key: str(entry.account.accountUuid), organization: str(entry.account.organizationUuid), email: str(entry.account.emailAddress) || 'Email not saved' }))
+    },
     async list() {
       const now = Date.now()
       return { generatedAt: now, accounts: (await load()).map((entry) => usageDto(entry, now)) }

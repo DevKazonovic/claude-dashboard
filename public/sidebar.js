@@ -1,22 +1,21 @@
-import { $, el, icon, link, urlFor, navigate, createResource, every, readStore, writeStore, skeleton, live, button, spinner } from './ui.js'
+import { $, el, icon, link, urlFor, navigate, createResource, every, readStore, writeStore, skeleton, live, button, spinner, statusDot } from './ui.js'
+import { chatLink, projectLink } from './panels.js'
 
 const RECENTS_MS = 10000
 const SEARCH_MS = 250
 const OPEN_KEY = 'claude-dashboard-open-projects'
 const NAV = [
   { view: 'overview', label: 'Overview' },
-  { view: 'live', label: 'Running now' },
+  { view: 'skills', label: 'Skills' },
+  { view: 'plugins', label: 'Plugins' },
+  { view: 'analytics', label: 'Analytics' },
+]
+const FOOT = [
   { view: 'conversations', label: 'Conversations' },
   { view: 'projects', label: 'Projects' },
+  { view: 'settings', label: 'Settings' },
 ]
 const MOBILE = window.matchMedia('(max-width: 900px)')
-
-function statusDot(session) {
-  if (!session) return null
-  if (session.status === 'busy') return spinner(session.statusLabel)
-  const tone = session.status === 'waiting' || session.status === 'blocked' ? 'waiting' : 'idle'
-  return el('span', { class: `dot dot-${tone}`, role: 'img', 'aria-label': session.statusLabel, title: session.statusLabel })
-}
 
 function liveSignature(data) {
   return data ? data.sessions.map((session) => `${session.id}:${session.status}`).sort().join(',') : ''
@@ -56,7 +55,7 @@ export function createSidebar() {
   }
 
   const navLinks = NAV.map((entry) => {
-    const count = entry.view === 'live' ? el('span', { class: 'nav-count', hidden: true }) : null
+    const count = entry.view === 'overview' ? el('span', { class: 'nav-count', hidden: true }) : null
     const node = link(urlFor({ view: entry.view === 'overview' ? null : entry.view }), { class: 'nav-item', 'data-view': entry.view, onnavigate: closeDrawer }, el('span', null, entry.label), count)
     return { entry, node, count }
   })
@@ -109,8 +108,9 @@ export function createSidebar() {
     return el(
       'li',
       null,
-      link(
-        urlFor({ session: item.id }),
+      chatLink(
+        item.id,
+        null,
         { class: 'recent', 'aria-current': current ? 'page' : null, title: item.title, 'data-focus': `recent-${item.id}`, onnavigate: closeDrawer },
         statusDot(liveSessionOf(item)),
         el('span', { class: 'recent-title' }, item.title),
@@ -134,7 +134,11 @@ export function createSidebar() {
       { class: `project-group${open ? ' is-open' : ''}` },
       head,
       el('ul', { class: 'recent-list', id: listId, hidden: !open }, group.items.map(recentItem)),
-      open && group.moreLabel ? link(urlFor({ view: 'conversations', project: group.project || null, q: query || null }), { class: 'project-more', onnavigate: closeDrawer }, group.moreLabel) : null,
+      open && group.moreLabel
+        ? group.project
+          ? projectLink(group.project, { class: 'project-more', onnavigate: closeDrawer }, group.moreLabel)
+          : link(urlFor({ view: 'conversations', q: query || null }), { class: 'project-more', onnavigate: closeDrawer }, group.moreLabel)
+        : null,
     )
   }
 
@@ -205,7 +209,7 @@ export function createSidebar() {
   })
 
   live.subscribe((state) => {
-    const count = navLinks.find((item) => item.entry.view === 'live').count
+    const count = navLinks.find((item) => item.entry.view === 'overview').count
     const running = state.data ? state.data.totals.count : 0
     count.hidden = !running
     count.textContent = running ? String(running) : ''
@@ -217,8 +221,8 @@ export function createSidebar() {
     if (recents.state.data) renderRecents(recents.state)
   })
 
-  const settingsLink = link(urlFor({ view: 'settings' }), { class: 'nav-item', 'data-view': 'settings', onnavigate: closeDrawer }, el('span', null, 'Settings'))
-  $('foot-nav').replaceChildren(settingsLink)
+  const footLinks = FOOT.map((entry) => ({ entry, node: link(urlFor({ view: entry.view }), { class: 'nav-item', 'data-view': entry.view, onnavigate: closeDrawer }, el('span', null, entry.label)) }))
+  $('foot-nav').replaceChildren(...footLinks.map((item) => item.node))
 
   function openDrawer() {
     document.body.classList.add('drawer-open')
@@ -271,12 +275,10 @@ export function createSidebar() {
     update(next) {
       const changed = next.session !== route.session
       route = next
-      for (const item of navLinks) {
-        if (item.entry.view === route.view && !route.session) item.node.setAttribute('aria-current', 'page')
+      for (const item of [...navLinks, ...footLinks]) {
+        if (item.entry.view === route.view) item.node.setAttribute('aria-current', 'page')
         else item.node.removeAttribute('aria-current')
       }
-      if (route.view === 'settings') settingsLink.setAttribute('aria-current', 'page')
-      else settingsLink.removeAttribute('aria-current')
       if (changed && recents.state.status === 'ready') {
         revealCurrent()
         renderRecents(recents.state)

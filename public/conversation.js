@@ -2,7 +2,6 @@ import {
   el,
   icon,
   link,
-  urlFor,
   navigate,
   setTitle,
   getJson,
@@ -37,8 +36,12 @@ const INPUT_MAX_HEIGHT = 200
 const OPEN_NOTE_MS = 5000
 const OPEN_NOTE_LONG_MS = 30000
 
-export function conversationPage(container, params) {
-  return createConversation(container, { id: params.get('session'), agent: null }, params)
+export function conversationView(container, id, params, href) {
+  return createConversation(container, { id, agent: null }, params, { href })
+}
+
+export function agentView(container, id, agent, params, options) {
+  return createConversation(container, { id, agent }, params, options)
 }
 
 function toggleSet(set, key) {
@@ -132,6 +135,7 @@ function toolDetails(tool) {
 function createConversation(container, target, initialParams, options = {}) {
   const isAgent = Boolean(target.agent)
   const embedded = Boolean(options.onClose)
+  const { href } = options
   const query = `id=${encodeURIComponent(target.id)}${isAgent ? `&agent=${encodeURIComponent(target.agent)}` : ''}`
   const base = isAgent ? `/api/agent?${query}` : `/api/session?${query}`
   const state = {
@@ -181,18 +185,21 @@ function createConversation(container, target, initialParams, options = {}) {
   const slideTitleId = `slide-title-${isAgent ? target.agent : target.id}`
   const slideTitle = el('h2', { class: 'slideover-title', id: slideTitleId })
   const slideMeta = el('p', { class: 'meta' })
+  const contextTitle = el('span')
+  const slideContext = options.onOpenChat ? el('p', { class: 'meta slide-context', hidden: true }, contextTitle, el('button', { class: 'text-button', type: 'button', onclick: () => options.onOpenChat() }, 'Open chat')) : null
   const slideBack = embedded ? el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Back to the agent', hidden: true, onclick: () => closeDetail() }, icon('back')) : null
   const slideClose = el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close', onclick: () => (embedded ? options.onClose() : closeDetail()) }, icon('close'))
   const slideBody = el('div', { class: 'slideover-body scroll-area', hidden: embedded })
   const agentPane = embedded ? el('div', { class: 'agent-pane' }, el('div', { class: 'agent-top' }, head, working, statusNote, notice), chatScroll) : null
-  const slideover = el('aside', { class: embedded ? 'slideover agent-slideover' : 'slideover', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': slideTitleId, hidden: !embedded }, el('div', { class: 'slideover-head' }, slideBack, el('div', { class: 'slideover-heading' }, slideTitle, slideMeta), slideClose), agentPane, slideBody)
+  const slideover = el('aside', { class: embedded ? 'slideover agent-slideover' : 'slideover', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': slideTitleId, hidden: !embedded }, el('div', { class: 'slideover-head' }, slideBack, el('div', { class: 'slideover-heading' }, slideTitle, slideMeta, slideContext), slideClose), agentPane, slideBody)
   const slideBackdrop = el('div', { class: 'slideover-backdrop', hidden: !embedded, onclick: () => (embedded ? options.onClose() : closeDetail()) })
 
-  let crumbsHolder = null
   let detailsButton = null
   let foldButton = null
   let vscodeButton = null
   let terminalButton = null
+  let copyResume = null
+  let tools = null
   let openNote = null
   let openNoteTimer = null
   let composer = null
@@ -208,21 +215,20 @@ function createConversation(container, target, initialParams, options = {}) {
   let layout = null
   if (embedded) container.append(slideBackdrop, slideover)
   else {
-    const bar = el('div', { class: 'chat-bar' })
     composer = buildComposer()
     bottom = el('div', { class: 'chat-bottom', hidden: true }, el('div', { class: 'chat-wrap' }, composer.form))
-    const pane = el('div', { class: 'chat-pane' }, el('div', { class: 'chat-top' }, el('div', { class: 'chat-wrap' }, bar, head, notice)), chatScroll, bottom)
+    const pane = el('div', { class: 'chat-pane' }, el('div', { class: 'chat-top' }, el('div', { class: 'chat-wrap' }, head, notice)), chatScroll, bottom)
     sideBody = el('div', { class: 'side-body' })
     sideClose = el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close details', onclick: () => closeSide(true) }, icon('close'))
     side = el('aside', { class: 'side scroll-area', id: `side-${target.id}`, 'aria-label': 'Details' }, el('div', { class: 'side-head' }, el('h2', { class: 'side-title' }, 'Details'), sideClose), sideBody)
     sideBackdrop = el('div', { class: 'side-backdrop', hidden: true, onclick: () => closeSide(false) })
-    crumbsHolder = el('div', { class: 'chat-crumbs' })
     detailsButton = el('button', { class: 'button small details-button', type: 'button', 'aria-controls': side.id, 'data-focus': 'details-button', hidden: true, onclick: () => openSide() })
-    foldButton = el('button', { class: 'button small ghost', type: 'button', 'data-focus': 'fold-all', hidden: true, onclick: () => toggleFoldAll() })
-    vscodeButton = el('button', { class: 'button small', type: 'button', 'data-focus': 'open-vscode', hidden: true, onclick: () => openIn('vscode') }, 'Open in VS Code')
-    terminalButton = el('button', { class: 'button small', type: 'button', 'data-focus': 'open-terminal', hidden: true, onclick: () => openIn('terminal') }, 'Open in Terminal')
+    foldButton = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'fold-all', hidden: true, onclick: () => toggleFoldAll() })
+    vscodeButton = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'open-vscode', hidden: true, onclick: () => openIn('vscode') })
+    terminalButton = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'open-terminal', hidden: true, onclick: () => openIn('terminal') })
+    copyResume = el('button', { class: 'icon-button chat-tool', type: 'button', 'data-focus': 'copy-resume', 'aria-label': 'Copy the resume command', title: 'Copy the resume command', hidden: true, onclick: () => copyResumeCommand() }, icon('copy'))
+    tools = el('span', { class: 'chat-tools', role: 'toolbar', 'aria-label': 'Conversation actions' }, foldButton, vscodeButton, terminalButton, copyResume, detailsButton)
     openNote = el('p', { class: 'open-note', role: 'status', hidden: true })
-    bar.append(crumbsHolder, el('div', { class: 'chat-bar-actions' }, foldButton, vscodeButton, terminalButton, detailsButton))
     notice.after(openNote)
     accountNote = el('p', { class: 'account-note', hidden: true })
     usageHolder = el('div', { class: 'chat-usage' })
@@ -256,6 +262,8 @@ function createConversation(container, target, initialParams, options = {}) {
     if (agentView) agentView.escape()
     else if (!slideover.hidden) closeDetail()
     else if (layout.classList.contains('side-open')) closeSide(true)
+    else return
+    event.preventDefault()
   }
   if (!embedded) document.addEventListener('keydown', onKey)
 
@@ -343,11 +351,11 @@ function createConversation(container, target, initialParams, options = {}) {
   }
 
   function pageUrl(detail) {
-    return urlFor({ session: target.id, agent: target.agent, detail })
+    return href({ agent: target.agent, detail })
   }
 
   function agentHref(agentId) {
-    return urlFor({ session: target.id, agent: agentId })
+    return href({ agent: agentId })
   }
 
   function agentLink(agentId, props, ...children) {
@@ -361,7 +369,7 @@ function createConversation(container, target, initialParams, options = {}) {
     }
     if (agentView) agentView.destroy()
     else agentReturnFocus = document.activeElement
-    agentView = { agent: agentId, ...createConversation(layout, { id: target.id, agent: agentId }, params, { onClose: closeAgent }) }
+    agentView = { agent: agentId, ...createConversation(layout, { id: target.id, agent: agentId }, params, { onClose: closeAgent, href: options.href }) }
   }
 
   function closeAgent() {
@@ -418,6 +426,8 @@ function createConversation(container, target, initialParams, options = {}) {
   }
 
   async function openIn(where) {
+    const opener = state.status === 'ready' ? state.data.opener : null
+    if (state.opening || !opener || !opener.available) return
     state.opening = where
     renderOpener()
     try {
@@ -428,6 +438,15 @@ function createConversation(container, target, initialParams, options = {}) {
     }
     state.opening = null
     renderOpener()
+  }
+
+  async function copyResumeCommand() {
+    try {
+      await navigator.clipboard.writeText(state.data.resumeCommand)
+      showOpenNote('Copied the resume command. Paste it in any terminal.', false)
+    } catch {
+      showOpenNote(`Copy failed. The command is: ${state.data.resumeCommand}`, true)
+    }
   }
 
   function showOpenNote(text, failed, sticky) {
@@ -442,15 +461,21 @@ function createConversation(container, target, initialParams, options = {}) {
     if (!foldButton) return
     const ready = state.status === 'ready'
     foldButton.hidden = !ready
-    foldButton.textContent = state.repliesCollapsed ? 'Expand responses' : 'Collapse responses'
+    const foldLabel = state.repliesCollapsed ? 'Expand responses' : 'Collapse responses'
+    foldButton.replaceChildren(icon(state.repliesCollapsed ? 'chevrons' : 'fold'))
+    foldButton.setAttribute('aria-label', foldLabel)
+    foldButton.title = foldLabel
     foldButton.setAttribute('aria-pressed', String(state.repliesCollapsed))
     const opener = ready ? state.data.opener : null
-    for (const [button, where, label] of [[vscodeButton, 'vscode', 'Open in VS Code'], [terminalButton, 'terminal', 'Open in Terminal']]) {
+    for (const [button, where, label, glyph] of [[vscodeButton, 'vscode', 'Open in VS Code', 'code'], [terminalButton, 'terminal', 'Open in Terminal', 'terminal']]) {
+      const text = state.opening === where ? `${label}: opening` : opener && !opener.available && opener.note ? `${label}: ${opener.note}` : label
       button.hidden = !opener
-      button.disabled = !opener || !opener.available || Boolean(state.opening)
-      button.title = opener && opener.note ? opener.note : ''
-      button.textContent = state.opening === where ? 'Opening' : label
+      button.setAttribute('aria-disabled', String(!opener || !opener.available || Boolean(state.opening)))
+      button.setAttribute('aria-label', text)
+      button.title = text
+      button.replaceChildren(state.opening === where ? spinner() : icon(glyph))
     }
+    copyResume.hidden = !(ready && state.data.resumeCommand)
   }
 
   function drawerMode() {
@@ -808,6 +833,9 @@ function createConversation(container, target, initialParams, options = {}) {
     const data = state.status === 'ready' ? state.data : null
     slideTitle.textContent = data ? data.title : 'Agent'
     slideMeta.textContent = data ? joinMeta([data.workflowLabel, data.modelsLabel, data.tokensLabel]) : ''
+    if (!slideContext || !data) return
+    contextTitle.textContent = data.session.title
+    slideContext.hidden = false
   }
 
   function agentSummary(data) {
@@ -897,7 +925,6 @@ function createConversation(container, target, initialParams, options = {}) {
   function renderFrame() {
     if (state.status === 'loading') {
       if (!embedded) setTitle('Conversation')
-      if (crumbsHolder) crumbsHolder.replaceChildren()
       renderAccount()
       renderSlideHead()
       head.replaceChildren(skeleton('title-line w-60'), skeleton('line w-40'))
@@ -908,7 +935,6 @@ function createConversation(container, target, initialParams, options = {}) {
     }
     if (state.status === 'error') {
       if (!embedded) setTitle('Conversation')
-      if (crumbsHolder) crumbsHolder.replaceChildren(crumbs(null))
       renderAccount()
       renderSlideHead()
       head.replaceChildren()
@@ -929,7 +955,6 @@ function createConversation(container, target, initialParams, options = {}) {
     }
     chatBody.hidden = false
     if (!embedded) setTitle(state.data.title)
-    if (crumbsHolder) keepFocus(crumbsHolder, () => crumbsHolder.replaceChildren(crumbs(state.data)))
     if (detailsButton) {
       detailsButton.hidden = false
       detailsButton.textContent = `Details · ${state.data.tokensLabel}`
@@ -1070,15 +1095,9 @@ function createConversation(container, target, initialParams, options = {}) {
     }
   }
 
-  function crumbs(data) {
-    const parts = [link(urlFor({ view: 'conversations' }), { class: 'crumb' }, 'Conversations')]
-    if (data && data.project) parts.push(el('span', { class: 'crumb-sep', 'aria-hidden': 'true' }, '/'), link(urlFor({ view: 'conversations', project: data.project }), { class: 'crumb', 'data-focus': 'crumb-project' }, data.projectName))
-    return el('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' }, parts)
-  }
-
   function headContent(data) {
     const badges = [badge(data.status, data.statusLabel), data.whereLabel ? badge('neutral', data.whereLabel) : null]
-    return [el('h1', { class: 'chat-title' }, data.title), el('div', { class: 'convo-meta' }, el('span', { class: 'badges' }, badges), el('span', null, joinMeta([data.projectLabel, data.modelsLabel, data.tokensLabel])))]
+    return [el('h1', { class: 'chat-title' }, data.title), el('div', { class: 'convo-meta' }, el('span', { class: 'badges' }, badges), el('span', null, joinMeta([data.projectLabel, data.modelsLabel, data.tokensLabel])), tools)]
   }
 
   function turnNode(turn) {
@@ -1400,7 +1419,10 @@ function createConversation(container, target, initialParams, options = {}) {
       else if (embedded) options.onClose()
     },
     depth() {
-      return state.detailOpenedHere ? 1 : 0
+      return (state.detailOpenedHere ? 1 : 0) + (agentView && agentOpenedHere ? 1 + agentView.depth() : 0)
+    },
+    focus() {
+      slideClose.focus({ preventScroll: true })
     },
     destroy() {
       destroyed = true
