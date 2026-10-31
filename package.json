@@ -30,7 +30,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "start": "node bin/claude-dashboard.js"
+    "start": "node bin/claude-dashboard.js",
+    "dev": "node --watch bin/claude-dashboard.js --no-open --port 3747"
   },
   "engines": {
     "node": ">=18"

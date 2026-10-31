@@ -104,7 +104,7 @@ Nowhere new. The dashboard keeps what it reads in memory, and the browser only r
 
 ## Contributing
 
-Issues and pull requests are welcome. There is no build step: the server is in `src/`, the page is in `public/`, and both are plain JavaScript. Clone the repo, run `npm start` in it, change a file, restart and refresh the page.
+Issues and pull requests are welcome. There is no build step: the server is in `src/`, the page is in `public/`, and both are plain JavaScript. Clone the repo and run `npm run dev` in it: the dashboard runs at http://127.0.0.1:3747 and restarts every time you save a file in `src/` or `bin/`. Refresh the page after you change `public/`.
 
 ## License
 
