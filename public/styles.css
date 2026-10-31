@@ -1742,6 +1742,19 @@ button.bar {
   display: none;
 }
 
+.flow-usage {
+  display: grid;
+  gap: 12px;
+  margin-block-start: 8px;
+  padding-block-start: 10px;
+  border-block-start: 1px solid var(--border);
+  pointer-events: auto;
+}
+
+.flow-usage:empty {
+  display: none;
+}
+
 .flow-pill {
   position: absolute;
   inset-block-start: 16px;
@@ -2384,6 +2397,69 @@ button.bar {
 
 .usage-strip-plan {
   color: var(--muted);
+}
+
+.usage-toggle {
+  justify-self: start;
+}
+
+.usage-summary {
+  display: grid;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.usage-bars {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.usage-bars-label {
+  color: var(--muted);
+}
+
+.usage-table {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) auto auto;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 12.5px;
+}
+
+.usage-table-span {
+  grid-column: 1 / -1;
+}
+
+.usage-table .usage-strip-account:not(:first-child) {
+  margin-block-start: 6px;
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--border);
+}
+
+.usage-table-label {
+  color: var(--fg-2);
+}
+
+.usage-table-percent {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.usage-table-percent.severity-critical {
+  color: var(--red);
+}
+
+.usage-table-percent.is-outdated {
+  color: var(--muted);
+}
+
+.usage-table-reset {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .usage-strip-check {

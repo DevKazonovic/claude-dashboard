@@ -10,6 +10,10 @@ const SAVE_GAP_MS = 5 * 60 * 1000
 const REFRESH_TIMEOUT_MS = 30 * 1000
 const DAY_MS = 24 * 60 * 60 * 1000
 const GROUP_TITLES = { session: null, weekly: 'Weekly limits' }
+const SUMMARY_LIMITS = [
+  { kind: 'session', label: '5h' },
+  { kind: 'weekly_all', label: 'Weekly' },
+]
 
 function str(value) {
   return typeof value === 'string' ? value : ''
@@ -23,9 +27,9 @@ function planLabel(account) {
   return [team, plan].filter(Boolean).join(', ') || null
 }
 
-function resetLabel(resetAt, now) {
-  if (resetAt - now < DAY_MS) return `Resets in ${format.duration(resetAt - now)}`
-  return `Resets ${new Date(resetAt).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
+function resetWhen(resetAt, now) {
+  if (resetAt - now < DAY_MS) return `in ${format.duration(resetAt - now)}`
+  return new Date(resetAt).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })
 }
 
 function limitLabel(limit) {
@@ -49,7 +53,22 @@ function limitDto(limit, now) {
     percentLabel: percent >= 100 && !passed ? 'Limit reached' : `${percent}% used`,
     severity,
     outdated: passed,
-    resetLabel: !Number.isFinite(resetAt) ? null : passed ? `Reset at ${format.timeLabel(resetAt, now)}, after Claude Code last checked` : resetLabel(resetAt, now),
+    resetLabel: !Number.isFinite(resetAt) ? null : passed ? `Reset at ${format.timeLabel(resetAt, now)}, after Claude Code last checked` : `Resets ${resetWhen(resetAt, now)}`,
+  }
+}
+
+function limitRow(limit, label, now) {
+  if (!limit) return { label, percent: 0, percentLabel: '0%', severity: 'normal', outdated: false, resetLabel: 'not started', title: `${label}: no usage in this window yet` }
+  const dto = limitDto(limit, now)
+  const resetAt = Date.parse(str(limit.resets_at))
+  return {
+    label,
+    percent: dto.percent,
+    percentLabel: `${dto.percent}%`,
+    severity: dto.severity,
+    outdated: dto.outdated,
+    resetLabel: !Number.isFinite(resetAt) ? null : dto.outdated ? 'reset since' : resetWhen(resetAt, now),
+    title: [`${label}: ${dto.percentLabel}`, dto.resetLabel].filter(Boolean).join('. '),
   }
 }
 
@@ -65,6 +84,8 @@ function usageDto(entry, now) {
     if (!groups.has(key)) groups.set(key, { key, title: key in GROUP_TITLES ? GROUP_TITLES[key] : 'Other limits', limits: [] })
     groups.get(key).limits.push(limitDto(limit, now))
   }
+  const pinned = SUMMARY_LIMITS.map(({ kind, label }) => limitRow(limits.find((limit) => limit.kind === kind), label, now))
+  const others = limits.filter((limit) => !SUMMARY_LIMITS.some((pin) => pin.kind === limit.kind)).map((limit) => limitRow(limit, limitLabel(limit), now))
   return {
     key: str(account.accountUuid),
     email: str(account.emailAddress) || 'Email not saved',
@@ -73,6 +94,8 @@ function usageDto(entry, now) {
     planLabel: planLabel(account),
     folderLabel: format.homePath(entry.configDir),
     groups: [...groups.values()],
+    summaryLimits: fetchedAt && sameAccount ? pinned : null,
+    limitRows: fetchedAt && sameAccount ? [...pinned, ...others] : null,
     checkedLabel: fetchedAt && sameAccount ? `Claude Code checked these ${format.ago(fetchedAt, now)}.` : 'Claude Code has not saved usage limits for this account yet.',
     checkedShort: fetchedAt && sameAccount ? `Checked ${format.ago(fetchedAt, now)}` : 'Not checked yet',
     stale: Boolean(fetchedAt && sameAccount && now - fetchedAt > STALE_MS),

@@ -1,6 +1,7 @@
 import { el, icon, link, urlFor, navigate, setTitle, live, spinner, badge, joinMeta, stateBlock, errorBlock, keepFocus, reducedMotion, readStore, writeStore, createMenu, button } from './ui.js'
 import { openChat, openProject, openRun } from './panels.js'
 import { createOps } from './ops.js'
+import { createUsage } from './usage.js'
 
 const NODE_W = 248
 const NODE_H = 64
@@ -9,13 +10,14 @@ const DOWN = { level: 56, sibling: 20, stack: 12, indent: 40, block: 56 }
 const ARROW_GAP = 3
 const CORNER = 10
 const PAD = 56
-const PAD_TOP = 104
+const HEAD_GAP = 18
 const MIN_ZOOM = 0.2
 const MAX_ZOOM = 1.4
 const GRID = 20
 const MINI_W = 200
 const MINI_H = 140
 const LAYOUT_KEY = 'claude-dashboard-flow-layout'
+const USAGE_KEY = 'claude-dashboard-flow-usage'
 const LAYOUTS = [
   { key: 'side', label: 'Sideways' },
   { key: 'down', label: 'Waterfall' },
@@ -181,6 +183,7 @@ export function overviewPage(container, params) {
   let miniScale = 1
   let direction = ['down', 'ops'].includes(readStore(LAYOUT_KEY)) ? readStore(LAYOUT_KEY) : 'side'
   let room = null
+  let headSpace = 0
   let project = params.get('project') || null
   let inside = params.get('conversation') || null
   const edgeEls = new Map()
@@ -205,7 +208,9 @@ export function overviewPage(container, params) {
   mini.append(miniNodes, miniMask)
 
   const summary = el('p', { class: 'flow-summary' })
-  const head = el('div', { class: 'flow-head' }, el('h1', { class: 'flow-heading' }, 'Overview'), summary)
+  const usageHolder = el('div', { class: 'flow-usage' })
+  const head = el('div', { class: 'flow-head' }, el('h1', { class: 'flow-heading' }, 'Overview'), summary, usageHolder)
+  const usage = createUsage(usageHolder, { collapseKey: USAGE_KEY })
   const pill = el('p', { class: 'flow-pill', role: 'status', hidden: true })
   const empty = el('div', { class: 'flow-empty', hidden: true })
   const controls = el(
@@ -258,13 +263,19 @@ export function overviewPage(container, params) {
     apply()
   }
 
+  function headBottom() {
+    if (!usage.expanded()) headSpace = head.offsetTop + head.offsetHeight + HEAD_GAP
+    return Math.min(headSpace || head.offsetTop + usageHolder.offsetTop + HEAD_GAP, canvas.clientHeight - PAD - NODE_H)
+  }
+
   function fit(animate) {
     const w = canvas.clientWidth
     const h = canvas.clientHeight
     if (!graph || !w || !h) return
     if (animate) touched = false
-    const k = clamp(Math.min((w - PAD * 2) / graph.width, (h - PAD_TOP - PAD) / graph.height), MIN_ZOOM, 1)
-    move({ k, x: (w - graph.width * k) / 2, y: PAD_TOP + (h - PAD_TOP - PAD - graph.height * k) / 2 }, animate)
+    const top = headBottom()
+    const k = clamp(Math.min((w - PAD * 2) / graph.width, (h - top - PAD) / graph.height), MIN_ZOOM, 1)
+    move({ k, x: (w - graph.width * k) / 2, y: top + (h - top - PAD - graph.height * k) / 2 }, animate)
   }
 
   function zoomAt(px, py, next) {
@@ -425,7 +436,7 @@ export function overviewPage(container, params) {
   }
 
   function onPointerDown(event) {
-    if (shown() === 'ops' || event.target.closest('.flow-node, .flow-controls, .flow-tools, .flow-empty')) return
+    if (shown() === 'ops' || event.target.closest('.flow-node, .flow-controls, .flow-tools, .flow-empty, .flow-usage')) return
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
     canvas.setPointerCapture(event.pointerId)
     if (event.target.closest('.flow-minimap')) {
@@ -498,11 +509,13 @@ export function overviewPage(container, params) {
     if (node && event.target.matches(':focus-visible')) reveal(node)
   })
   const resize = new ResizeObserver(() => {
+    roomHolder.style.setProperty('inset-block-start', `${headBottom()}px`)
     if (!graph) return
     if (touched) apply()
     else fit(false)
   })
   resize.observe(canvas)
+  resize.observe(head)
   function renderSwitch() {
     keepFocus(switcher, () =>
       switcher.replaceChildren(
@@ -522,6 +535,7 @@ export function overviewPage(container, params) {
   }
 
   renderSwitch()
+  usage.start()
   const unsubscribe = live.subscribe(render)
 
   return {
@@ -537,6 +551,7 @@ export function overviewPage(container, params) {
     },
     destroy() {
       projectMenu.close()
+      usage.stop()
       unsubscribe()
       resize.disconnect()
       window.clearTimeout(moveTimer)
