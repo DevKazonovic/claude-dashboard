@@ -37,6 +37,8 @@ The dashboard opens <http://127.0.0.1:3737> in your browser and runs until you p
 | `claude-dashboard start` | Runs it in the background, so it keeps running after you close the terminal. |
 | `claude-dashboard status` | Shows whether it is running, and where. |
 | `claude-dashboard stop` | Stops it. |
+| `claude-dashboard enable` | Starts it now and every time you log in. macOS only. |
+| `claude-dashboard disable` | Stops starting it at login, and stops it now. |
 | `claude-dashboard update` | Installs the newest version from GitHub. |
 
 To uninstall it, run `npm uninstall -g claude-dashboard`. To try it once without installing anything, run `npx -y github:DevKazonovic/claude-dashboard`.

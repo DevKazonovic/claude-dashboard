@@ -3,7 +3,7 @@ const { start } = require('../src/server')
 const commands = require('../src/commands')
 const { version } = require('../package.json')
 
-const COMMANDS = ['start', 'stop', 'status', 'update']
+const COMMANDS = ['start', 'stop', 'status', 'enable', 'disable', 'update']
 
 const HELP = `Usage: claude-dashboard [command] [options]
 
@@ -15,6 +15,8 @@ Commands:
   start                  Run in the background, so you can close the terminal.
   stop                   Stop the dashboard.
   status                 Show whether the dashboard is running, and where.
+  enable                 Start it now and every time you log in. macOS only.
+  disable                Stop starting it at login, and stop it now.
   update                 Install the newest version from GitHub.
 
 Options:
