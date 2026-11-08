@@ -40,12 +40,14 @@ The dashboard opens <http://127.0.0.1:3737> in your browser and runs until you p
 | `claude-dashboard enable` | Starts it now and every time you log in. macOS only. |
 | `claude-dashboard disable` | Stops starting it at login, and stops it now. |
 | `claude-dashboard update` | Installs the newest version from GitHub. |
+| `claude-dashboard tasks` | Reads and changes the Tasks page. Run `claude-dashboard tasks --help` for its actions. |
 
 To uninstall it, run `npm uninstall -g claude-dashboard`. To try it once without installing anything, run `npx -y github:DevKazonovic/claude-dashboard`.
 
 ## Features
 
 - **Running now.** Every open Claude Code conversation on your computer, grouped by project, with the Claude account it runs on. A live line shows what each conversation and agent is doing, such as `Bash Run the tests · 52 s`.
+- **Tasks.** One page for you and Claude to keep track of your work, for any project. Now shows what is being worked on, next to every open conversation and what it is doing. Everything else sits in categories, and you can filter by status, category, who it is on, and type. You edit it on the page, and Claude edits it from any conversation with `claude-dashboard tasks`.
 - **Chat view.** Read any conversation the way the Claude Code panel in VS Code shows it. Thinking and tool calls fold into one line; open it to see every model call, its tokens, and each tool's input and output. Collapse responses hides Claude's replies so you see only your prompts, and you can open any single reply again.
 - **Search.** Find a conversation by its title, its folder, or anything you wrote in it.
 - **Agents and workflows.** Subagents and workflow agents show as cards in the chat. Open one to read its whole run in a side panel, live while it works.
@@ -65,6 +67,7 @@ Everything stays on your computer.
 
 - It reads the files Claude Code saves in `~/.claude` and `~/.claude-*`, and never changes them.
 - It never reads your Claude login and never contacts Anthropic or any other server itself. Usage limits come from the copy Claude Code saves in `.claude.json`. The Refresh button runs `claude -p /usage` for that account, so Claude Code checks with its own login and saves the new numbers. It doesn't send a prompt, so it doesn't use up your limits.
+- The only thing it saves is your Tasks page, in a private file in your user folder. See [Where is my data stored?](#faq).
 - It only listens on `127.0.0.1`, so other devices on your network cannot open it.
 - It only acts when you click: the reply box runs `claude --resume <id> --print` in that conversation's folder, and the Open buttons start VS Code or a terminal with `claude --resume <id>`, all with your own Claude Code settings and permissions.
 
@@ -76,6 +79,7 @@ Add options after the command, for example `claude-dashboard start --port 4000`.
 | --- | --- |
 | `--port <number>` | Use another port. The default is 3737; if it is taken, the next free one is used. |
 | `--config-dir <path>` | Also read this Claude config folder. `~/.claude` and every `~/.claude-*` folder are found automatically. Repeat it for several folders. |
+| `--data-dir <path>` | Keep the Tasks page data in this folder. |
 | `--no-open` | Do not open the browser. |
 
 ## How tokens are counted
@@ -102,7 +106,7 @@ Replying from the page starts `claude.exe`, which comes with Claude Code's nativ
 VS Code asks "Allow 'Claude Code' extension to open this URI?" before it lets the extension open the conversation, and that dialog can sit behind your browser. Switch to VS Code, choose Open, and tick the box so it stops asking. You can also add `"extensions.confirmedUriHandlerExtensionIds": ["anthropic.claude-code"]` to your VS Code settings.
 
 **Where is my data stored?**
-Nowhere new. The dashboard keeps what it reads in memory, and the browser only remembers your theme and which project groups you opened.
+Your tasks are saved in `tasks.json`, next to a backup of the version before it, in `~/Library/Application Support/claude-dashboard` on macOS, `~/.local/share/claude-dashboard` on Linux and `%APPDATA%\claude-dashboard` on Windows. Everything else stays in memory, and the browser only remembers your theme and which project groups you opened.
 
 ## Contributing
 

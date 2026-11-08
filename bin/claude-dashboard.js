@@ -3,7 +3,7 @@ const { start } = require('../src/server')
 const commands = require('../src/commands')
 const { version } = require('../package.json')
 
-const COMMANDS = ['start', 'stop', 'status', 'enable', 'disable', 'update']
+const COMMANDS = ['start', 'stop', 'status', 'enable', 'disable', 'update', 'tasks']
 
 const HELP = `Usage: claude-dashboard [command] [options]
 
@@ -18,12 +18,14 @@ Commands:
   enable                 Start it now and every time you log in. macOS only.
   disable                Stop starting it at login, and stop it now.
   update                 Install the newest version from GitHub.
+  tasks                  Read and change the Tasks page. See tasks --help.
 
 Options:
   -p, --port <number>    Port to listen on (default 3737)
   --config-dir <path>    Also read this Claude config folder. Repeat it for
                          several folders. ~/.claude and ~/.claude-* are
                          found automatically.
+  --data-dir <path>      Keep the Tasks page data in this folder
   --no-open              Do not open the browser
   -v, --version          Show the version
   -h, --help             Show this help`
@@ -32,6 +34,11 @@ function parseArgs(argv) {
   const options = { command: null, port: 3737, open: true, configDirs: [], stateFile: null, help: false, version: false, error: null }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
+    if (arg === 'tasks' && i === 0) {
+      options.command = arg
+      options.args = argv.slice(1)
+      break
+    }
     if (arg === '-h' || arg === '--help') options.help = true
     else if (arg === '-v' || arg === '--version') options.version = true
     else if (arg === '--no-open') options.open = false
@@ -43,6 +50,12 @@ function parseArgs(argv) {
       else options.configDirs.push(value)
     }
     else if (arg.startsWith('--config-dir=')) options.configDirs.push(arg.slice('--config-dir='.length))
+    else if (arg === '--data-dir') {
+      const value = argv[++i]
+      if (!value || value.startsWith('-')) options.error = 'The --data-dir option needs a folder path.'
+      else options.dataDir = value
+    }
+    else if (arg.startsWith('--data-dir=')) options.dataDir = arg.slice('--data-dir='.length)
     else if (arg === '--state-file' && argv[i + 1]) options.stateFile = argv[++i]
     else if (!arg.startsWith('-') && !options.command && COMMANDS.includes(arg)) options.command = arg
     else options.error = arg.startsWith('-') ? `Unknown option: ${arg}` : `Unknown command: ${arg}`

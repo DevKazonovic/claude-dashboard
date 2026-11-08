@@ -6,6 +6,7 @@ const SEARCH_MS = 250
 const OPEN_KEY = 'claude-dashboard-open-projects'
 const NAV = [
   { view: 'overview', label: 'Overview' },
+  { view: 'tasks', label: 'Tasks' },
   { view: 'skills', label: 'Skills' },
   { view: 'plugins', label: 'Plugins' },
   { view: 'analytics', label: 'Analytics' },

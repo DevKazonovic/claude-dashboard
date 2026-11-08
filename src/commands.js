@@ -7,6 +7,7 @@ const { createCollector } = require('./collector')
 const { createTerminal } = require('./terminal')
 const { health, openBrowser, scanSummary, HOST } = require('./server')
 const { homePath } = require('./format')
+const tasksCli = require('./tasks-cli')
 const { version: VERSION } = require('../package.json')
 
 const SOURCE = 'github:DevKazonovic/claude-dashboard'
@@ -138,7 +139,7 @@ function startupFailed(ui) {
 }
 
 function serverArgs(options) {
-  return [BIN, '--no-open', '--state-file', STATE_FILE, '--port', String(options.port), ...options.configDirs.flatMap((dir) => ['--config-dir', path.resolve(dir)])]
+  return [BIN, '--no-open', '--state-file', STATE_FILE, '--port', String(options.port), ...options.configDirs.flatMap((dir) => ['--config-dir', path.resolve(dir)]), ...(options.dataDir ? ['--data-dir', path.resolve(options.dataDir)] : [])]
 }
 
 async function stopProcess(running) {
@@ -373,4 +374,8 @@ async function update(options) {
   if (running && running.background) ui.note('The dashboard in the background still runs the old version. Restart it with claude-dashboard stop, then claude-dashboard start.')
 }
 
-module.exports = { start, stop, status, enable, disable, update }
+function tasks(options) {
+  return tasksCli.run(options.args || [], findRunning)
+}
+
+module.exports = { start, stop, status, enable, disable, update, tasks }

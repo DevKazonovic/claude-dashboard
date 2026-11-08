@@ -1,4 +1,4 @@
-export const APP_NAME = 'Claude Code usage'
+export const APP_NAME = 'Claude Dashboard'
 
 const SVG = {
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
@@ -19,6 +19,7 @@ const SVG = {
   code: '<path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/>',
   terminal: '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>',
   copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
 }
 
 export const RANGE_PRESETS = [
@@ -153,7 +154,7 @@ export function setTitle(text) {
   if (title) title.textContent = text || APP_NAME
 }
 
-const VIEW_PATHS = { overview: '/overview', conversations: '/conversations', projects: '/projects', skills: '/skills', plugins: '/plugins', analytics: '/analytics', settings: '/settings' }
+const VIEW_PATHS = { overview: '/overview', tasks: '/tasks', conversations: '/conversations', projects: '/projects', skills: '/skills', plugins: '/plugins', analytics: '/analytics', settings: '/settings' }
 
 export function urlFor({ view, session, agent, ...params }) {
   const search = new URLSearchParams()
@@ -260,7 +261,11 @@ export async function postJson(url, data) {
   } catch {
     body = null
   }
-  if (!response.ok) throw new Error((body && body.error) || `The dashboard server answered with status ${response.status}.`)
+  if (!response.ok) {
+    const failure = new Error((body && body.error) || `The dashboard server answered with status ${response.status}.`)
+    failure.field = body && body.field ? body.field : null
+    throw failure
+  }
   return body
 }
 

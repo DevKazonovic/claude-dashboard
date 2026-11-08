@@ -9,6 +9,7 @@ const { createAccounts } = require('./accounts')
 const { createExtensions } = require('./extensions')
 const { createMarketplace } = require('./marketplace')
 const { createOps } = require('./ops')
+const { createTasks, buildTasksPage, buildTask } = require('./tasks')
 const { buildLive, buildHistory, buildOverview, buildProjects, buildRecents, scanDto } = require('./views')
 const { buildConversation, buildAgent, buildChat, buildTurn, sendMessage, stopMessage, openConversation, RequestError } = require('./conversation')
 const format = require('./format')
@@ -24,6 +25,7 @@ const SCRIPT = 'text/javascript; charset=utf-8'
 const PAGE = ['index.html', 'text/html; charset=utf-8']
 const APP_PATHS = [
   /^\/overview\/?$/,
+  /^\/tasks\/?$/,
   /^\/conversations\/?$/,
   /^\/projects\/?$/,
   /^\/skills\/?$/,
@@ -47,6 +49,7 @@ const STATIC_FILES = {
   '/markdown.js': ['markdown.js', SCRIPT],
   '/sidebar.js': ['sidebar.js', SCRIPT],
   '/pages.js': ['pages.js', SCRIPT],
+  '/tasks.js': ['tasks.js', SCRIPT],
   '/flow.js': ['flow.js', SCRIPT],
   '/panels.js': ['panels.js', SCRIPT],
   '/ops.js': ['ops.js', SCRIPT],
@@ -63,7 +66,7 @@ const HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 }
-const POST_ROUTES = new Set(['/api/send', '/api/stop', '/api/open', '/api/accounts/refresh', '/api/skills/edit', '/api/marketplace/action'])
+const POST_ROUTES = new Set(['/api/send', '/api/stop', '/api/open', '/api/accounts/refresh', '/api/skills/edit', '/api/marketplace/action', '/api/tasks/add', '/api/tasks/update'])
 const BODY_LIMIT = 256 * 1024
 
 function readBody(req) {
@@ -137,7 +140,7 @@ function sendJson(res, status, data) {
   send(res, status, JSON.stringify(data), 'application/json; charset=utf-8')
 }
 
-function createHandler(collector, timelines, runs, accounts, extensions, marketplace, ops, port, report) {
+function createHandler(collector, timelines, runs, accounts, extensions, marketplace, ops, tasks, port, report) {
   const allowedHosts = new Set([`${HOST}:${port}`, `localhost:${port}`, `[::1]:${port}`])
   return async (req, res) => {
     if (!allowedHosts.has(req.headers.host)) return send(res, 403, 'Forbidden', 'text/plain; charset=utf-8')
@@ -153,6 +156,13 @@ function createHandler(collector, timelines, runs, accounts, extensions, marketp
         if (!body) return sendJson(res, 400, { error: 'The request body is not valid JSON.' })
         if (url.pathname === '/api/send') return sendJson(res, 200, await sendMessage(collector, runs, body))
         if (url.pathname === '/api/open') return sendJson(res, 200, await openConversation(collector, runs, body))
+        if (url.pathname === '/api/tasks/add' || url.pathname === '/api/tasks/update') {
+          try {
+            return sendJson(res, 200, await (url.pathname === '/api/tasks/add' ? tasks.add(body) : tasks.update(body)))
+          } catch (error) {
+            return sendJson(res, error.status || 500, { error: error.message, field: error.field || null })
+          }
+        }
         if (url.pathname === '/api/marketplace/action') {
           try {
             return sendJson(res, 200, await marketplace.act(body))
@@ -183,6 +193,22 @@ function createHandler(collector, timelines, runs, accounts, extensions, marketp
       }
       if (url.pathname === '/api/live') return sendJson(res, 200, await buildLive(collector, accounts))
       if (url.pathname === '/api/ops') return sendJson(res, 200, await ops.build(collector))
+      if (url.pathname === '/api/tasks') {
+        try {
+          return sendJson(res, 200, await buildTasksPage(tasks, collector, accounts, params))
+        } catch (error) {
+          return sendJson(res, error.status || 500, { error: error.message })
+        }
+      }
+      if (url.pathname === '/api/task') {
+        try {
+          const task = await buildTask(tasks, collector, accounts, params)
+          if (!task) return sendJson(res, 404, { error: 'This task was not found.' })
+          return sendJson(res, 200, task)
+        } catch (error) {
+          return sendJson(res, error.status || 500, { error: error.message })
+        }
+      }
       if (url.pathname === '/api/sessions') return sendJson(res, 200, await buildHistory(collector, params))
       if (url.pathname === '/api/overview') return sendJson(res, 200, await buildOverview(collector, params))
       if (url.pathname === '/api/projects') return sendJson(res, 200, await buildProjects(collector, params))
@@ -324,6 +350,7 @@ async function start(options) {
   const extensions = createExtensions(collector, accounts)
   const marketplace = createMarketplace()
   const ops = createOps()
+  const tasks = createTasks({ dir: options.dataDir })
   await collector.init()
   for (let port = options.port; port < options.port + PORT_ATTEMPTS; port++) {
     const url = `http://${HOST}:${port}/`
@@ -332,7 +359,7 @@ async function start(options) {
       if (options.open) openBrowser(url, ui)
       return
     }
-    const server = http.createServer(createHandler(collector, timelines, runs, accounts, extensions, marketplace, ops, port, (text) => ui.log(text, 'error')))
+    const server = http.createServer(createHandler(collector, timelines, runs, accounts, extensions, marketplace, ops, tasks, port, (text) => ui.log(text, 'error')))
     try {
       await listen(server, port)
     } catch (error) {

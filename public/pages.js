@@ -58,14 +58,14 @@ const PROJECT_SORTS = [
   { key: 'name:asc', label: 'Name' },
 ]
 
-function pageShell(container, { title, intro }) {
+export function pageShell(container, { title, intro }) {
   const actions = el('div', { class: 'page-actions' })
   const body = el('div', { class: 'page-body' })
   container.replaceChildren(el('div', { class: 'page' }, el('header', { class: 'page-head' }, el('div', { class: 'page-heading' }, el('h1', { class: 'page-title' }, title), intro ? el('p', { class: 'page-intro' }, intro) : null), actions), body))
   return { actions, body }
 }
 
-function paramsOf(query, keys) {
+export function paramsOf(query, keys) {
   const result = {}
   for (const key of keys) if (query.get(key)) result[key] = query.get(key)
   return result
@@ -77,7 +77,7 @@ function rangeParams(query) {
   return range === 'custom' ? { range, from: query.get('from'), to: query.get('to') } : { range }
 }
 
-function apiQuery(params) {
+export function apiQuery(params) {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) if (value) search.set(key, value)
   return search.toString()
@@ -287,7 +287,7 @@ export function analyticsPage(container, params) {
   }
 }
 
-function searchInput(placeholder, value, onSearch) {
+export function searchInput(placeholder, value, onSearch) {
   let timer = null
   const input = el('input', { class: 'input search', type: 'search', placeholder, 'aria-label': placeholder, autocomplete: 'off', spellcheck: 'false', value })
   input.addEventListener('input', () => {
