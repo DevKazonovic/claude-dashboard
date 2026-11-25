@@ -154,7 +154,7 @@ export function setTitle(text) {
   if (title) title.textContent = text || APP_NAME
 }
 
-const VIEW_PATHS = { overview: '/overview', tasks: '/tasks', conversations: '/conversations', projects: '/projects', skills: '/skills', plugins: '/plugins', analytics: '/analytics', settings: '/settings' }
+const VIEW_PATHS = { overview: '/overview', tasks: '/tasks', conversations: '/conversations', projects: '/projects', skills: '/skills', plugins: '/plugins', analytics: '/analytics', settings: '/settings', godeye: '/godeye', understand: '/understand' }
 
 export function urlFor({ view, session, agent, ...params }) {
   const search = new URLSearchParams()

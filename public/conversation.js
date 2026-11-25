@@ -35,6 +35,7 @@ const FOLLOW_SLACK = 160
 const INPUT_MAX_HEIGHT = 200
 const OPEN_NOTE_MS = 5000
 const OPEN_NOTE_LONG_MS = 30000
+const TASK_PREVIEW = 280
 
 export function conversationView(container, id, params, href) {
   return createConversation(container, { id, agent: null }, params, { href })
@@ -180,18 +181,18 @@ function createConversation(container, target, initialParams, options = {}) {
   const working = el('p', { class: 'live-line chat-working', hidden: true })
   const statusNote = el('p', { class: 'visually-hidden', role: 'status' })
   const chatBody = el('div', { class: 'chat-body' }, olderBar, list, embedded ? null : [working, statusNote])
-  const chatScroll = el('div', { class: 'chat-scroll scroll-area' }, el('div', { class: 'chat-col' }, chatBody))
+  const agentFacts = embedded ? el('div', { class: 'agent-facts' }) : null
+  const chatScroll = el('div', { class: 'chat-scroll scroll-area' }, el('div', { class: 'chat-col' }, embedded ? el('h3', { class: 'agent-section-title' }, 'Task and steps') : null, chatBody, agentFacts))
 
   const slideTitleId = `slide-title-${isAgent ? target.agent : target.id}`
   const slideTitle = el('h2', { class: 'slideover-title', id: slideTitleId })
   const slideMeta = el('p', { class: 'meta' })
-  const contextTitle = el('span')
-  const slideContext = options.onOpenChat ? el('p', { class: 'meta slide-context', hidden: true }, contextTitle, el('button', { class: 'text-button', type: 'button', onclick: () => options.onOpenChat() }, 'Open chat')) : null
+  const openChatButton = options.onOpenChat ? el('button', { class: 'agent-open-chat', type: 'button', onclick: () => options.onOpenChat() }, 'Open chat') : null
   const slideBack = embedded ? el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Back to the agent', hidden: true, onclick: () => closeDetail() }, icon('back')) : null
   const slideClose = el('button', { class: 'icon-button', type: 'button', 'aria-label': 'Close', onclick: () => (embedded ? options.onClose() : closeDetail()) }, icon('close'))
   const slideBody = el('div', { class: 'slideover-body scroll-area', hidden: embedded })
-  const agentPane = embedded ? el('div', { class: 'agent-pane' }, el('div', { class: 'agent-top' }, head, working, statusNote, notice), chatScroll) : null
-  const slideover = el('aside', { class: embedded ? 'slideover agent-slideover' : 'slideover', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': slideTitleId, hidden: !embedded }, el('div', { class: 'slideover-head' }, slideBack, el('div', { class: 'slideover-heading' }, slideTitle, slideMeta, slideContext), slideClose), agentPane, slideBody)
+  const agentPane = embedded ? el('div', { class: 'agent-pane' }, el('div', { class: 'agent-top' }, working, head, statusNote, notice), chatScroll) : null
+  const slideover = el('aside', { class: embedded ? 'slideover agent-slideover' : 'slideover', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': slideTitleId, hidden: !embedded }, el('div', { class: 'slideover-head' }, slideBack, el('div', { class: 'slideover-heading' }, slideTitle, slideMeta), openChatButton, slideClose), agentPane, slideBody)
   const slideBackdrop = el('div', { class: 'slideover-backdrop', hidden: !embedded, onclick: () => (embedded ? options.onClose() : closeDetail()) })
 
   let detailsButton = null
@@ -832,31 +833,49 @@ function createConversation(container, target, initialParams, options = {}) {
     if (!embedded || !slideBody.hidden) return
     const data = state.status === 'ready' ? state.data : null
     slideTitle.textContent = data ? data.title : 'Agent'
-    slideMeta.textContent = data ? joinMeta([data.workflowLabel, data.modelsLabel, data.tokensLabel]) : ''
-    if (!slideContext || !data) return
-    contextTitle.textContent = data.session.title
-    slideContext.hidden = false
+    const ended = Boolean(data) && !isWorking()
+    slideMeta.hidden = !ended
+    slideMeta.replaceChildren(...(ended ? [el('span', { class: `agent-state is-${data.status}` }, data.statusLabel), data.durationLabel ? el('span', null, data.durationLabel) : null].filter(Boolean) : []))
   }
 
-  function agentSummary(data) {
-    return [
-      el('div', { class: 'convo-meta' }, el('span', { class: 'badges' }, badge(data.status, data.statusLabel), badge('neutral', data.typeLabel), data.phase ? badge('neutral', data.phase) : null), el('span', null, data.callsLabel)),
-      el(
-        'div',
-        null,
-        disclosure({
-          label: 'Tokens and details',
-          open: state.ui.panels.has('agent'),
-          onToggle: () => toggleSet(state.ui.panels, 'agent'),
-          focusKey: 'agent-details',
-          className: 'small-toggle',
-          content: () => [
-            shareRows(data.tokens),
-            el('dl', { class: 'facts' }, fact('Ran for', data.durationLabel || 'Unknown'), data.workflowLabel ? fact('Workflow', data.workflowLabel) : null, fact('Last active', data.lastActiveLabel), fact('Agent ID', data.id)),
-          ],
-        }),
-      ),
-    ]
+  function detailsToggle() {
+    const open = state.ui.panels.has('agent')
+    agentPane.classList.toggle('is-detailed', open)
+    return el(
+      'button',
+      {
+        class: 'disclosure agent-details-toggle',
+        type: 'button',
+        'aria-expanded': String(open),
+        'data-focus': 'agent-details',
+        onclick: () => {
+          toggleSet(state.ui.panels, 'agent')
+          keepFocus(head, () => head.replaceChildren(detailsToggle()))
+        },
+      },
+      icon('chevron', 'disclosure-chevron'),
+      el('span', null, 'Details'),
+    )
+  }
+
+  function renderAgentFacts(data) {
+    const section = (title, rows) => el('section', { class: 'agent-section' }, el('h3', { class: 'agent-section-title' }, title), el('dl', { class: 'agent-rows' }, rows.filter(Boolean).map(([label, value]) => [el('dt', null, label), el('dd', null, value)])))
+    agentFacts.replaceChildren(
+      section('Usage', [
+        ['Tokens', data.tokensLabel],
+        ...data.tokens.map((row) => [row.label, joinMeta([row.valueLabel, row.detailLabel])]),
+        ['Model', data.modelsLabel],
+        ['Model calls', data.callsLabel],
+        ['Ran for', data.durationLabel || 'Unknown'],
+      ]),
+      section('Where', [
+        ['Project', data.session.projectLabel],
+        ['Conversation', data.session.title],
+        data.workflowId ? ['Workflow', data.workflowName || data.workflowId] : null,
+        ...(data.parents || []).map((parent) => ['Agent', parent.title]),
+        ['Agent ID', data.id],
+      ]),
+    )
   }
 
   function renderDetail() {
@@ -871,6 +890,7 @@ function createConversation(container, target, initialParams, options = {}) {
       return
     }
     slideTitle.textContent = segment.title || segment.label
+    slideMeta.hidden = false
     slideMeta.textContent = joinMeta([`Message ${turn.number}`, turn.kindLabel, turn.atLabel])
     const entries = segment.entries || [segment]
     const sections = []
@@ -961,7 +981,8 @@ function createConversation(container, target, initialParams, options = {}) {
     }
     renderAccount()
     renderSlideHead()
-    keepFocus(head, () => head.replaceChildren(...(embedded ? agentSummary(state.data) : headContent(state.data))))
+    keepFocus(head, () => head.replaceChildren(...(embedded ? [detailsToggle()] : headContent(state.data))))
+    if (embedded) renderAgentFacts(state.data)
     renderNotice()
     renderSide()
     renderWorking()
@@ -997,6 +1018,7 @@ function createConversation(container, target, initialParams, options = {}) {
   }
 
   function renderWorking() {
+    if (embedded) renderSlideHead()
     const busy = isWorking()
     working.hidden = !busy
     if (!busy) return working.replaceChildren()
@@ -1160,7 +1182,7 @@ function createConversation(container, target, initialParams, options = {}) {
       'div',
       { class: 'msg-user' },
       el('p', { class: 'msg-meta' }, joinMeta([turn.kind === 'prompt' ? null : turn.kindLabel, turn.atLabel])),
-      prompt.text ? clampable(el('span', null, prompt.text), { long: prompt.long, key, openSet: state.ui.text, className: 'bubble' }) : null,
+      prompt.text ? clampable(el('span', null, prompt.text), { long: prompt.long || (embedded && prompt.text.length > TASK_PREVIEW), key, openSet: state.ui.text, className: 'bubble' }) : null,
       prompt.attachmentsLabel ? el('p', { class: 'note' }, `Attached: ${prompt.attachmentsLabel}`) : null,
       prompt.requestLabel ? el('p', { class: 'note' }, prompt.requestLabel) : null,
       prompt.truncatedNote ? el('p', { class: 'note' }, prompt.truncatedNote) : null,

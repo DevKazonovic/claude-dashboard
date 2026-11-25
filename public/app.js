@@ -2,11 +2,13 @@ import { $, getJson, live, routeFor, navigate, urlFor } from './ui.js'
 import { createSidebar } from './sidebar.js'
 import { analyticsPage, conversationsPage, projectsPage, skillsPage, pluginsPage, settingsPage, notFoundPage } from './pages.js'
 import { overviewPage } from './flow.js'
+import { godeyePage } from './godeye.js'
+import { understandPage } from './understand.js'
 import { tasksPage } from './tasks.js'
 import { createPanels, CHAT_KEYS } from './panels.js'
 
 const LIVE_MS = 3000
-const VIEWS = { overview: overviewPage, tasks: tasksPage, conversations: conversationsPage, projects: projectsPage, skills: skillsPage, plugins: pluginsPage, analytics: analyticsPage, settings: settingsPage, notfound: notFoundPage }
+const VIEWS = { overview: overviewPage, tasks: tasksPage, conversations: conversationsPage, projects: projectsPage, skills: skillsPage, plugins: pluginsPage, analytics: analyticsPage, settings: settingsPage, godeye: godeyePage, understand: understandPage, notfound: notFoundPage }
 
 function pageParams(params) {
   const copy = new URLSearchParams(params)
@@ -28,6 +30,7 @@ function render() {
   const signature = params.toString()
   sidebar.update({ ...route, session: route.params.get('chat') })
   panels.sync(route.params)
+  $('main').classList.toggle('is-canvas', route.view === 'overview' || route.view === 'godeye' || route.view === 'understand')
   if (active && active.key === route.view) {
     if (active.signature !== signature) {
       active.signature = signature
@@ -38,7 +41,6 @@ function render() {
   if (active) active.controller.destroy()
   const content = $('content')
   content.replaceChildren()
-  $('main').classList.toggle('is-canvas', route.view === 'overview')
   $('scroller').scrollTop = 0
   active = { key: route.view, signature, controller: VIEWS[route.view](content, params) }
   if (!route.params.get('chat')) content.focus({ preventScroll: true })

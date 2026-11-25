@@ -10,6 +10,8 @@ const NAV = [
   { view: 'skills', label: 'Skills' },
   { view: 'plugins', label: 'Plugins' },
   { view: 'analytics', label: 'Analytics' },
+  { view: 'godeye', label: 'GodEye' },
+  { view: 'understand', label: 'Understand' },
 ]
 const FOOT = [
   { view: 'conversations', label: 'Conversations' },
