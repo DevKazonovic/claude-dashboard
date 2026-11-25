@@ -3,7 +3,7 @@ const { start } = require('../src/server')
 const commands = require('../src/commands')
 const { version } = require('../package.json')
 
-const COMMANDS = ['start', 'stop', 'status', 'enable', 'disable', 'update', 'tasks']
+const COMMANDS = ['start', 'stop', 'status', 'enable', 'disable', 'update', 'tasks', 'skills']
 
 const HELP = `Usage: claude-dashboard [command] [options]
 
@@ -19,6 +19,7 @@ Commands:
   disable                Stop starting it at login, and stop it now.
   update                 Install the newest version from GitHub.
   tasks                  Read and change the Tasks page. See tasks --help.
+  skills                 Install the /understand and /godeye skills for Claude Code.
 
 Options:
   -p, --port <number>    Port to listen on (default 3737)

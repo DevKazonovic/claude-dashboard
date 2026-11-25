@@ -1,0 +1,18 @@
+{
+  "godeye": 4,
+  "feature": "",
+  "product": "",
+  "summary": "",
+  "sheets": [
+    {
+      "id": "1",
+      "level": "idea",
+      "title": "",
+      "status": "draft",
+      "boxes": [
+        { "id": "feature", "kind": "feature", "name": "", "at": [1, 1] }
+      ],
+      "lines": []
+    }
+  ]
+}

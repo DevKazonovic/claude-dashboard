@@ -8,11 +8,14 @@ const { createTerminal } = require('./terminal')
 const { health, openBrowser, scanSummary, HOST } = require('./server')
 const { homePath } = require('./format')
 const tasksCli = require('./tasks-cli')
+const { defaultDataDir } = require('./tasks')
 const { version: VERSION } = require('../package.json')
 
 const SOURCE = 'github:DevKazonovic/claude-dashboard'
 const NPM_PERMISSIONS = 'https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally'
 const BIN = path.join(__dirname, '..', 'bin', 'claude-dashboard.js')
+const SKILLS = path.join(__dirname, '..', 'skills')
+const ROOT_MARK = '{{CLAUDE_DASHBOARD}}'
 const STATE_DIR = path.join(os.tmpdir(), `claude-dashboard-${typeof process.getuid === 'function' ? process.getuid() : os.userInfo().username}`)
 const STATE_FILE = path.join(STATE_DIR, 'state.json')
 const LOG_DIR = process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Logs', 'claude-dashboard') : STATE_DIR
@@ -378,4 +381,48 @@ function tasks(options) {
   return tasksCli.run(options.args || [], findRunning)
 }
 
-module.exports = { start, stop, status, enable, disable, update, tasks }
+function skillFiles(dir, base = dir) {
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => !entry.name.startsWith('.'))
+    .flatMap((entry) => {
+      const full = path.join(dir, entry.name)
+      return entry.isDirectory() ? skillFiles(full, base) : [path.relative(base, full)]
+    })
+    .sort()
+}
+
+async function skills(options) {
+  const ui = createTerminal({ version: VERSION })
+  const root = path.join(__dirname, '..').split(path.sep).join('/')
+  const target = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills')
+  const backup = path.join(options.dataDir || defaultDataDir(), 'skill-backups', new Date().toISOString().replace(/[:.]/g, '-'))
+  const names = fs.readdirSync(SKILLS, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
+  for (const name of names) {
+    const from = path.join(SKILLS, name)
+    const dest = path.join(target, name)
+    const files = skillFiles(from).map((file) => {
+      const data = fs.readFileSync(path.join(from, file))
+      return [file, data.includes(ROOT_MARK) ? Buffer.from(data.toString().replaceAll(ROOT_MARK, root)) : data]
+    })
+    const installed = fs.existsSync(dest) ? skillFiles(dest) : null
+    const same = installed && installed.join('\n') === files.map(([file]) => file).join('\n') &&
+      files.every(([file, data]) => data.equals(fs.readFileSync(path.join(dest, file))))
+    if (same) {
+      ui.note(`/${name} is already up to date`)
+      continue
+    }
+    if (installed) {
+      fs.cpSync(dest, path.join(backup, name), { recursive: true })
+      fs.rmSync(dest, { recursive: true, force: true })
+    }
+    for (const [file, data] of files) {
+      fs.mkdirSync(path.dirname(path.join(dest, file)), { recursive: true })
+      fs.writeFileSync(path.join(dest, file), data)
+    }
+    ui.done(`Installed /${name}`)
+  }
+  if (fs.existsSync(backup)) ui.note(`The old copies are in ${homePath(backup)}`)
+  ui.note('In Claude Code, run /understand in a project or /godeye to design a feature, then open the Understand or GodEye page.')
+}
+
+module.exports = { start, stop, status, enable, disable, update, tasks, skills }

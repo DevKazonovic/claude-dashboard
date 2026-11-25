@@ -41,6 +41,7 @@ The dashboard opens <http://127.0.0.1:3737> in your browser and runs until you p
 | `claude-dashboard disable` | Stops starting it at login, and stops it now. |
 | `claude-dashboard update` | Installs the newest version from GitHub. |
 | `claude-dashboard tasks` | Reads and changes the Tasks page. Run `claude-dashboard tasks --help` for its actions. |
+| `claude-dashboard skills` | Installs the /understand and /godeye skills, which fill the Understand and GodEye pages. |
 
 To uninstall it, run `npm uninstall -g claude-dashboard`. To try it once without installing anything, run `npx -y github:DevKazonovic/claude-dashboard`.
 

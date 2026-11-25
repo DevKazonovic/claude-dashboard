@@ -1,0 +1,124 @@
+{
+  "godeye": 4,
+  "about": "One GodEye design file: a new feature drawn before any code, one level at a time, in plain words. The page lays out each sheet from the grid positions and draws every line itself.",
+  "file": {
+    "fields": ["godeye", "feature", "product", "summary", "sheets"],
+    "required": ["godeye", "feature", "sheets"]
+  },
+  "order": ["idea", "flow", "system", "parts", "logic", "build"],
+  "levels": {
+    "idea": {
+      "name": "Idea",
+      "sheet": "^1$",
+      "asks": "Who uses it, the problem, what done looks like, and the outside systems.",
+      "kinds": ["feature", "person", "outside", "store"],
+      "lines": ["plain", "copies", "blocked"]
+    },
+    "flow": {
+      "name": "Flow",
+      "sheet": "^2$",
+      "asks": "What the user does, step by step.",
+      "kinds": ["start", "step", "decision", "end", "stop"],
+      "lines": ["plain", "yes", "no", "loop"]
+    },
+    "system": {
+      "name": "System",
+      "sheet": "^3$",
+      "asks": "Which parts do the work and what moves between them.",
+      "kinds": ["person", "app", "service", "store", "outside"],
+      "lines": ["plain", "main"]
+    },
+    "parts": {
+      "name": "Parts",
+      "sheet": "^3\\.[1-9][0-9]*$",
+      "asks": "Inside one app or service: its pieces and which piece uses which.",
+      "kinds": ["part", "store"],
+      "lines": ["plain"]
+    },
+    "logic": {
+      "name": "Logic",
+      "sheet": "^3\\.[1-9][0-9]*\\.[1-9][0-9]*$",
+      "asks": "One hard piece as a flowchart in plain words: steps, yes/no, loops.",
+      "kinds": ["start", "step", "decision", "end", "stop", "question"],
+      "lines": ["plain", "yes", "no", "loop"]
+    },
+    "build": {
+      "name": "Build",
+      "sheet": "^4$",
+      "asks": "The slices Claude builds one at a time, each checked against its sheets.",
+      "kinds": ["slice"],
+      "lines": ["plain"]
+    }
+  },
+  "kinds": {
+    "feature": { "name": "Feature" },
+    "person": { "name": "Person" },
+    "outside": { "name": "Outside service" },
+    "store": { "name": "Storage" },
+    "app": { "name": "App", "work": true, "opens": "parts" },
+    "service": { "name": "Service", "work": true, "opens": "parts" },
+    "part": { "name": "Part", "work": true, "opens": "logic" },
+    "start": { "name": "Start" },
+    "step": { "name": "Step", "work": true },
+    "decision": { "name": "Decision" },
+    "end": { "name": "End" },
+    "stop": { "name": "Stop" },
+    "question": { "name": "Not decided" },
+    "slice": { "name": "Build slice", "work": true }
+  },
+  "lines": {
+    "plain": { "name": "Leads to" },
+    "main": { "name": "Main path", "order": true },
+    "copies": { "name": "Copies from" },
+    "blocked": { "name": "Never reaches" },
+    "yes": { "name": "Yes" },
+    "no": { "name": "No" },
+    "loop": { "name": "Goes back" }
+  },
+  "sheet": {
+    "fields": ["id", "level", "title", "status", "note", "boxes", "lines"],
+    "required": ["id", "level", "title", "status", "boxes"],
+    "status": ["approved", "draft"]
+  },
+  "box": {
+    "fields": ["id", "kind", "name", "note", "at", "opens", "does", "gets", "gives", "rules", "done", "out", "questions", "see", "from", "check", "status"],
+    "required": ["id", "kind", "name", "at"],
+    "id": "^[a-z0-9]+(-[a-z0-9]+)*$",
+    "text": ["name", "note", "does", "done", "check"],
+    "lists": ["gets", "gives", "rules", "out", "questions"],
+    "refs": ["see", "from"],
+    "ref": "^[1-9][0-9]*(\\.[1-9][0-9]*)*/[a-z0-9]+(-[a-z0-9]+)*$",
+    "only": {
+      "done": ["feature"],
+      "out": ["feature"],
+      "from": ["slice"],
+      "check": ["slice"],
+      "status": ["slice"]
+    },
+    "status": ["built", "building", "next"]
+  },
+  "line": {
+    "fields": ["from", "to", "label", "kind", "order", "both"],
+    "required": ["from", "to"],
+    "port": "^\\^[a-z0-9]+(-[a-z0-9]+)*$"
+  },
+  "limits": {
+    "sheets": 60,
+    "boxes": 16,
+    "lines": 40,
+    "work": 7,
+    "grid": 12
+  },
+  "rules": [
+    "Plain words only, zero code: no file, function, class, table, route or variable names. Name things the way the user would.",
+    "No em or en dashes. Never cut text with ... or a character limit.",
+    "Sheet 1 is the idea and holds exactly one feature box. Sheet 2 is the flow, sheet 3 the system, sheet 4 the build slices. A box on sheet 3 opens sheet 3.N (its parts), and a part on sheet 3.N opens sheet 3.N.M (its logic).",
+    "Every sheet 3.N and 3.N.M is opened by exactly one box on its parent sheet, through that box's opens field. The feature box on sheet 1 may open sheet 2.",
+    "A sheet holds at most 7 work boxes (apps, services, parts, steps, slices). When a sheet needs more, group some into one box that opens its own sheet.",
+    "A parts sheet keeps the connections of the box that opens it: every line that touches that box on sheet 3 shows up on the parts sheet as a port, written ^ plus the other box's id, in the same direction.",
+    "Boxes sit on a grid: at is [column, row], whole numbers from 0 up to 11, one box per cell. The page spaces the grid and draws every line.",
+    "A main line carries order, a number from 1, and the main lines on one sheet are numbered 1, 2, 3 and so on.",
+    "see and from point at other boxes as sheet/box, for example 3.2/run.",
+    "status on a sheet is draft until the user says ok to it, then approved. A slice status is next, building or built."
+  ]
+}
