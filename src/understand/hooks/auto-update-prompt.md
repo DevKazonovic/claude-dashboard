@@ -1,0 +1,133 @@
+# Auto-Update Knowledge Graph (Internal, Hook-Triggered)
+
+Incrementally update the knowledge graph after a commit. Do not ask the user for confirmation.
+
+Adapted from Understand Anything's auto-update prompt (MIT, see `../LICENSE-understand-anything`, relative to this file). Nothing is written inside the project: every artifact lives in the project's data folder `$DATA` under `~/.claude/understand/`. The scripts live in `../scripts/`, relative to this file. Every agent named below is a prompt file in `~/.claude/skills/understand/agents/`; dispatch it exactly as the **Agent dispatch** section of `~/.claude/skills/understand/SKILL.md` says (Agent tool, `subagent_type: "general-purpose"`, a prompt that starts with `Read ~/.claude/skills/understand/agents/<name>.md completely and follow it as your instructions.`, never the agent file's text).
+
+**Cost rule:** deletion-only, ignored-only, generated-artifact-only, and cosmetic-only updates dispatch no LLM agent. Local structural updates dispatch file-analyzer only for the current files that actually changed structurally. Whole-graph architecture/tour agents run only when the prepared plan requests them.
+
+## Phase 0: Pre-flight and deterministic preparation
+
+1. Set `PROJECT_ROOT` to the project root the hook message names (the session's working directory, as a real path). Resolve the data folder and the scripts folder once:
+
+   ```bash
+   SCRIPTS="$(dirname "<path of this file>")/../scripts"
+   node "$SCRIPTS/data-dir.mjs" "$PROJECT_ROOT" \
+     | node -e 'const j=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log("DATA="+j.dataDir);console.log("KEY="+j.key)'
+   ```
+
+   Set `$DATA` and `$KEY` to the printed values. Each command block may run in a fresh shell, so substitute `$PROJECT_ROOT`, `$DATA` and `$SCRIPTS` with their real values in every later command.
+
+2. Require `$DATA/knowledge-graph.json` and `$DATA/meta.json`. If either is missing, report that `/understand` must create a baseline and **STOP**.
+3. Read `gitCommitHash` from meta as `$LAST_COMMIT_HASH`; get `$HEAD_COMMIT` with `git -C "$PROJECT_ROOT" rev-parse HEAD`. If they match, report that the graph is current and **STOP**.
+4. Check that `$SCRIPTS/prepare-incremental.mjs` exists. If it does not, report that the Understand pipeline is missing from claude-dashboard and **STOP** without changing metadata.
+5. Run the helper with parameterized arguments (nothing needs building):
+
+   ```bash
+   node "$SCRIPTS/prepare-incremental.mjs" \
+     "$PROJECT_ROOT" \
+     "$LAST_COMMIT_HASH"
+   ```
+
+   The helper is authoritative for `git diff --name-status -z`, renames, spaces, POSIX normalization, the current scan/ignore rules, structural fingerprints, generated artifacts, and selective import-map refresh. Do not recreate or post-filter its decisions.
+6. Read `$DATA/intermediate/incremental-plan.json`.
+
+   | Action | Required behavior |
+   |---|---|
+   | `SKIP` | Run the finalizer below. It advances scan/fingerprint/meta for safe cosmetic or irrelevant changes and intentionally advances nothing for generated-only commits. Report zero tokens spent and **STOP**. |
+   | `PARTIAL_UPDATE` | Continue with targeted analysis. |
+   | `ARCHITECTURE_UPDATE` | Continue with targeted analysis, then rerun architecture and tour. |
+   | `FULL_UPDATE` | Immediately invoke `/understand --full` on `$PROJECT_ROOT`; do not patch the incremental baseline. |
+
+7. **Resolve the stored output language.** Read `$DATA/config.json`; if it has an `outputLanguage` field, construct `$LANGUAGE_DIRECTIVE` from it using the exact "Language directive template" in Phase 0 step 3.6 of `~/.claude/skills/understand/SKILL.md`. This hook has no user interaction, so the stored preference is the only source: never re-detect. If `config.json` is missing or has no `outputLanguage`, leave `$LANGUAGE_DIRECTIVE` unset and omit it from the lesson dispatch in Phase 3 (the writer treats the directive as optional).
+
+   SKIP finalizer:
+
+   ```bash
+   node "$SCRIPTS/finalize-incremental.mjs" "$PROJECT_ROOT"
+   ```
+
+## Phase 1: Targeted file analysis
+
+Read `filesToReanalyze` from the plan. It never contains deleted, ignored, cosmetic, or generated-artifact paths.
+
+- If the list is empty, dispatch no agent and create no new batch file. Continue directly to merge; `batch-existing.json` already contains the pruned graph. This covers deletion-only updates at zero token cost.
+- Otherwise compute only changed batches:
+
+  ```bash
+  node "$SCRIPTS/compute-batches.mjs" "$PROJECT_ROOT" \
+    --changed-files="$DATA/intermediate/changed-files.json"
+  ```
+
+  Dispatch file-analyzer for those batches only, with the batch prompt and parameters of Phase 2 in `~/.claude/skills/understand/SKILL.md` (its incremental update path), up to 5 at a time. Include `previousSymbols` for each batch's files from `incremental-symbol-baseline.json`: old symbol IDs, names, types, paths, line ranges, and class containment. Existing symbols that still exist must survive significance filtering. Preserve each original batch index in its output filename. Retry a failed dispatch once; if it still fails, **STOP** without running the finalizer or advancing the baseline.
+
+## Phase 2: Merge
+
+Run the deterministic merge in both empty and non-empty analyzer cases:
+
+```bash
+node "$SCRIPTS/merge-batch-graphs.mjs" "$PROJECT_ROOT"
+```
+
+It combines `batch-existing.json` with fresh batches and recovers imports from the refreshed `scan-result.json`, including `config:`, `schema:`, `service:`, and other valid whole-file nodes. Require both a successful exit and `$DATA/intermediate/assembled-graph.json`; failed candidates remain on disk for diagnosis.
+
+Merge runs `validate-incremental-symbols.mjs`, comparing the preserved old symbols with the candidate and base/current source. Read `incremental-symbol-report.json` for per-file counts, missing IDs/names, and still-present/deleted/unknown classifications. A same-size node set can still have missing symbols. Confirmed deletions are allowed; still-present or unknown omissions block publication.
+
+Merge also preserves normalized dangling edge candidates from fresh batches in `incremental-edge-candidates.json` before discarding unresolved endpoints. Every successful validation reconciles both endpoint IDs, including first-pass updates without a retry and repairs where omitted symbols return. This evidence excludes `batch-existing.json` and is cleared by fresh preparation.
+
+Current endpoint descriptors take precedence over baseline aliases when IDs are reused. Repair defers incoming edges outside the retained batch until their original HEAD identities are matched, preventing a reused ID from attaching an old current-analysis reference to a different symbol.
+
+If the report has `unresolvedFiles`, prepare one targeted symbol retry:
+
+```bash
+node "$SCRIPTS/prepare-symbol-retry.mjs" "$PROJECT_ROOT"
+```
+
+Dispatch only `batches[]` from `incremental-symbol-retry.json`, with the usual file-analyzer prompt and its supplied `files`, `batchIndex`, `batchImportData`, `neighborMap`, `previousSymbols`, and `missingSymbols`. Reanalyze those files completely. The helper preserves other merged results in `batch-0.json`, removes affected nodes and outgoing edges, and clears old numeric shards before repair. Current inbound edges from other files remain candidates until merge reconciles their replacement targets and drops dangling references. Rerun merge after this one repair. Never paste old nodes or semantic edges back into the candidate. The attempt is recorded for the base/head commits, even across repeated prepare calls.
+
+If the helper, repair dispatch, or second merge fails, **STOP** with diagnostics and leave `knowledge-graph.json`, `fingerprints.json`, and `meta.json` unchanged. Other merge failures without eligible unresolved files also stop immediately.
+
+Languages without a deterministic structural parser (including `.sh`, `.ps1`, and `.bat`) cannot have missing symbols automatically confirmed as deleted. Callables without explicit class containment also require source verification when their IDs/names are unchanged, regardless of whether class nodes were emitted; unverified identities block publication. These cases remain `unknown` and require manual investigation or parser support. Do not use supplemental LLM inspection or regex guesses to waive the gate.
+
+Do not dispatch assemble-reviewer or graph-reviewer for automatic updates.
+
+## Phase 3: Conditional architecture and tour
+
+- For `PARTIAL_UPDATE`, dispatch neither agent. The finalizer preserves existing layer assignments and tour prose, removes dangling references/empty layers, and assigns new nodes deterministically by directory depth, graph connectivity, then prior layer order.
+- For `ARCHITECTURE_UPDATE`, dispatch architecture-analyzer on the full merged node/edge set, including previous layers for naming stability, and write `$DATA/intermediate/layers.json`. Then dispatch tour-builder and write `$DATA/intermediate/tour.json`. Then normalize the tour deterministically: run `node "$SCRIPTS/normalize-tour.mjs" "$PROJECT_ROOT"` and use the resulting `$DATA/intermediate/tour.normalized.json` for the lesson dispatch (the finalizer applies the same normalization at save time; hand-written conversion disagrees with it). Before dispatching the lesson writer, delete any stale lesson scratch files left by an interrupted earlier run: `$DATA/intermediate/code-lessons.json`, `code-lessons.detailed.<N>.json`, and `code-lessons.normalized.json` (never touch the served `$DATA/code-lessons.json`). Then dispatch code-lesson-writer following the **Code Lessons** contract in Phase 5 of `~/.claude/skills/understand/SKILL.md` (rebuilt tour, detailed files in bounded batches, language directive) and write the batch outputs, normalized into `$DATA/intermediate/code-lessons.normalized.json` per that section's rules. Append `$LANGUAGE_DIRECTIVE` to each dispatch prompt when Phase 0 resolved one; without it, a project stored with a non-English `outputLanguage` would get its lessons regenerated in English beside the non-English graph and tour. Lessons are best-effort here: retry a failed batch once, and if any batch still fails leave no staged document, record the warning, and continue. Publication (Phase 4) then removes the stale served sidecar instead of leaving lessons for the previous tour.
+
+Retry either required agent once. If it still fails, **STOP** without advancing the baseline.
+
+## Phase 4: Atomic save and baseline patch
+
+Run:
+
+```bash
+node "$SCRIPTS/finalize-incremental.mjs" "$PROJECT_ROOT"
+```
+
+The finalizer performs deterministic graph/layer/tour validation and independently reruns the shared symbol check on the exact graph before writing. It atomically saves `knowledge-graph.json`, patches changed fingerprints while preserving untouched entries, removes deleted fingerprints, and only then writes `meta.json`. A graph-save failure must never advance the fingerprint or commit baseline. If symbol loss is first detected here, follow the same one-retry procedure, rerun merge and any required architecture/tour phases, then finalize; an already-used or unsuccessful repair must stop with the old graph and baselines intact.
+
+After the finalizer exits successfully, publish lessons with the same rules as **Lesson publication** under the incremental save gate in `~/.claude/skills/understand/SKILL.md`, only lessons staged by the current invocation: atomically move `$DATA/intermediate/code-lessons.normalized.json` over `$DATA/code-lessons.json` when this run staged it; when lessons were attempted but skipped or failed, delete a served `$DATA/code-lessons.json` instead; when the finalizer failed, touch nothing so the previous graph and lessons stay consistent. `PARTIAL_UPDATE` never attempts lessons, but incremental updates can still delete or newly ignore files from the graph while their source-derived lessons survive. So for every action except `SKIP` (and `PARTIAL_UPDATE` in particular), after the finalizer succeeds and the publication rules above have been applied, run:
+
+```bash
+node "$SCRIPTS/prune-code-lessons.mjs" "$PROJECT_ROOT"
+```
+
+The helper removes only entries whose file path has no node in the saved graph and leaves every surviving lesson's content untouched (the file is rewritten as normalized 2-space JSON). If the prune itself fails, report the warning and continue: the saved graph is already final and the idempotent helper can prune the orphans again on the next run; never roll the graph back for it.
+
+Report:
+
+- action taken;
+- files structurally analyzed;
+- deleted/ignored/cosmetic/generated counts from the plan;
+- whether architecture/tour ran;
+- output path `$DATA/knowledge-graph.json` and the Understand page link `http://127.0.0.1:3737/understand?project=$KEY` (an open page reloads by itself).
+
+## Error handling
+
+- Never fall back to a hand-written regex fingerprint script or an extension-only changed-file filter.
+- Never pass a deleted or ignored path to file-analyzer.
+- Never update `meta.json` after a failed graph/agent phase.
+- Never update `meta.json` for a generated-artifact-only commit.
+- Surface every warning or failure; a subsequent run can safely retry because the helper reconstructs the previous inventory from scan results, graph node `filePath` values, and fingerprints.

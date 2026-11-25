@@ -617,12 +617,16 @@ async function buildAgent(collector, timelines, accounts, params) {
   const now = Date.now()
   const session = describeSession(item, { range: null, now })
   const dto = session.agents.find((entry) => entry.id === agentId)
+  const byId = new Map(session.agents.map((entry) => [entry.id, entry]))
+  const parents = []
+  for (let up = byId.get(dto.parentId); up && parents.length < session.agents.length; up = byId.get(up.parentId)) parents.unshift({ id: up.id, title: up.description || up.typeLabel })
   const timeline = await timelines.get(agent.ref.file, 'agent')
   const models = modelsOf(agent.state, null)
   const firstAt = timeline.turns.length ? timeline.turns[0].at : null
   return {
     ...dto,
     revision,
+    parents,
     title: dto.description || dto.typeLabel,
     callsLabel: format.plural(dto.messages, 'model call', 'model calls'),
     session: { id: session.dto.id, title: session.dto.title, projectLabel: session.dto.projectLabel, live: session.dto.live },

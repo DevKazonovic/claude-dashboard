@@ -8,7 +8,8 @@ const { createRuns } = require('./runs')
 const { createAccounts } = require('./accounts')
 const { createExtensions } = require('./extensions')
 const { createMarketplace } = require('./marketplace')
-const { createOps } = require('./ops')
+const { createGodeye, MAX_FILE_BYTES } = require('./godeye')
+const { createUnderstand } = require('./understand')
 const { createTasks, buildTasksPage, buildTask } = require('./tasks')
 const { buildLive, buildHistory, buildOverview, buildProjects, buildRecents, scanDto } = require('./views')
 const { buildConversation, buildAgent, buildChat, buildTurn, sendMessage, stopMessage, openConversation, RequestError } = require('./conversation')
@@ -32,6 +33,8 @@ const APP_PATHS = [
   /^\/plugins\/?$/,
   /^\/analytics\/?$/,
   /^\/settings\/?$/,
+  /^\/godeye\/?$/,
+  /^\/understand\/?$/,
 ]
 const CHAT_PATH = /^\/chat\/([A-Za-z0-9_-]{6,100})\/?$/
 const AGENT_PATH = /^\/chat\/([A-Za-z0-9_-]{6,100})\/agents\/([A-Za-z0-9_-]{1,100})\/?$/
@@ -52,13 +55,25 @@ const STATIC_FILES = {
   '/tasks.js': ['tasks.js', SCRIPT],
   '/flow.js': ['flow.js', SCRIPT],
   '/panels.js': ['panels.js', SCRIPT],
-  '/ops.js': ['ops.js', SCRIPT],
-  '/ops3d.js': ['ops3d.js', SCRIPT],
-  '/vendor/three.core.min.js': ['vendor/three.core.min.js', SCRIPT],
-  '/vendor/three.module.min.js': ['vendor/three.module.min.js', SCRIPT],
-  '/vendor/CSS3DRenderer.js': ['vendor/CSS3DRenderer.js', SCRIPT],
   '/conversation.js': ['conversation.js', SCRIPT],
   '/usage.js': ['usage.js', SCRIPT],
+  '/godeye.js': ['godeye.js', SCRIPT],
+  '/godeye-sheets.js': ['godeye-sheets.js', SCRIPT],
+  '/understand.js': ['understand.js', SCRIPT],
+  '/understand-graph.js': ['understand-graph.js', SCRIPT],
+  '/understand-layout.js': ['understand-layout.js', SCRIPT],
+  '/understand.css': ['understand.css', 'text/css; charset=utf-8'],
+  '/understand-modules.js': ['understand-modules.js', SCRIPT],
+  '/understand-explore.js': ['understand-explore.js', SCRIPT],
+  '/understand-explore.css': ['understand-explore.css', 'text/css; charset=utf-8'],
+  '/understand-code.js': ['understand-code.js', SCRIPT],
+  '/understand-learn.js': ['understand-learn.js', SCRIPT],
+  '/understand-learn.css': ['understand-learn.css', 'text/css; charset=utf-8'],
+  '/understand-views.js': ['understand-views.js', SCRIPT],
+  '/understand-views.css': ['understand-views.css', 'text/css; charset=utf-8'],
+  '/vendor/dagre.min.js': ['vendor/dagre.min.js', SCRIPT],
+  '/vendor/fuse.mjs': ['vendor/fuse.mjs', SCRIPT],
+  '/vendor/prism.js': ['vendor/prism.js', SCRIPT],
 }
 const HEADERS = {
   'Cache-Control': 'no-store',
@@ -66,16 +81,16 @@ const HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 }
-const POST_ROUTES = new Set(['/api/send', '/api/stop', '/api/open', '/api/accounts/refresh', '/api/skills/edit', '/api/marketplace/action', '/api/tasks/add', '/api/tasks/update'])
+const POST_ROUTES = new Set(['/api/send', '/api/stop', '/api/open', '/api/accounts/refresh', '/api/skills/edit', '/api/marketplace/action', '/api/tasks/add', '/api/tasks/update', '/api/godeye/projects', '/api/godeye/maps'])
 const BODY_LIMIT = 256 * 1024
 
-function readBody(req) {
+function readBody(req, limit = BODY_LIMIT) {
   return new Promise((resolve, reject) => {
     const chunks = []
     let size = 0
     req.on('data', (chunk) => {
       size += chunk.length
-      if (size > BODY_LIMIT) {
+      if (size > limit) {
         reject(new RequestError(413, 'The message is too large to send.'))
         req.destroy()
         return
@@ -140,7 +155,7 @@ function sendJson(res, status, data) {
   send(res, status, JSON.stringify(data), 'application/json; charset=utf-8')
 }
 
-function createHandler(collector, timelines, runs, accounts, extensions, marketplace, ops, tasks, port, report) {
+function createHandler(collector, timelines, runs, accounts, extensions, marketplace, tasks, godeye, understand, port, report) {
   const allowedHosts = new Set([`${HOST}:${port}`, `localhost:${port}`, `[::1]:${port}`])
   return async (req, res) => {
     if (!allowedHosts.has(req.headers.host)) return send(res, 403, 'Forbidden', 'text/plain; charset=utf-8')
@@ -152,10 +167,12 @@ function createHandler(collector, timelines, runs, accounts, extensions, marketp
       if (posting) {
         if (!sameOrigin(req)) return sendJson(res, 403, { error: 'This request did not come from the dashboard page.' })
         if (!String(req.headers['content-type'] || '').startsWith('application/json')) return sendJson(res, 415, { error: 'Send the request as JSON.' })
-        const body = parseBody(await readBody(req))
+        const body = parseBody(await readBody(req, url.pathname === '/api/godeye/maps' ? MAX_FILE_BYTES * 2 : BODY_LIMIT))
         if (!body) return sendJson(res, 400, { error: 'The request body is not valid JSON.' })
         if (url.pathname === '/api/send') return sendJson(res, 200, await sendMessage(collector, runs, body))
         if (url.pathname === '/api/open') return sendJson(res, 200, await openConversation(collector, runs, body))
+        if (url.pathname === '/api/godeye/projects') return sendJson(res, 200, await godeye.createProject(body))
+        if (url.pathname === '/api/godeye/maps') return sendJson(res, 200, await godeye.addMap(body))
         if (url.pathname === '/api/tasks/add' || url.pathname === '/api/tasks/update') {
           try {
             return sendJson(res, 200, await (url.pathname === '/api/tasks/add' ? tasks.add(body) : tasks.update(body)))
@@ -192,7 +209,38 @@ function createHandler(collector, timelines, runs, accounts, extensions, marketp
         return sendJson(res, 200, { app: APP_ID, pid: process.pid, scan: scanDto(scan), counts: scan.status === 'done' ? await collector.counts() : null })
       }
       if (url.pathname === '/api/live') return sendJson(res, 200, await buildLive(collector, accounts))
-      if (url.pathname === '/api/ops') return sendJson(res, 200, await ops.build(collector))
+      if (url.pathname === '/api/godeye') return sendJson(res, 200, await godeye.list())
+      if (url.pathname === '/api/godeye/map') {
+        const map = await godeye.map(params)
+        if (!map) return sendJson(res, 404, { error: 'This map was not found on this computer.' })
+        return sendJson(res, 200, map)
+      }
+      if (url.pathname === '/api/understand') return sendJson(res, 200, await understand.list())
+      if (url.pathname === '/api/understand/version') {
+        const version = await understand.version(params)
+        if (!version) return sendJson(res, 404, { error: 'This project was not found in ~/.claude/understand.' })
+        return sendJson(res, 200, version)
+      }
+      if (url.pathname === '/api/understand/data') {
+        const data = await understand.data(params)
+        if (!data) return sendJson(res, 404, { error: params.get('file') === 'knowledge-graph.json' ? 'No knowledge graph found. Run /understand first.' : 'This file was not found for this project.' })
+        return sendJson(res, 200, data)
+      }
+      if (url.pathname === '/api/understand/source') {
+        const source = await understand.source(params)
+        if (!source) return sendJson(res, 404, { error: 'This project was not found in ~/.claude/understand.' })
+        return sendJson(res, 200, source)
+      }
+      if (url.pathname === '/api/understand/freshness') {
+        const freshness = await understand.freshness(params)
+        if (!freshness) return sendJson(res, 404, { error: 'This project was not found in ~/.claude/understand.' })
+        return sendJson(res, 200, freshness)
+      }
+      if (url.pathname === '/api/understand/thumb') {
+        const image = await understand.thumb(params)
+        if (!image) return sendJson(res, 404, { error: 'This thumbnail was not found for this project.' })
+        return send(res, 200, image, 'image/png')
+      }
       if (url.pathname === '/api/tasks') {
         try {
           return sendJson(res, 200, await buildTasksPage(tasks, collector, accounts, params))
@@ -349,7 +397,8 @@ async function start(options) {
   const accounts = createAccounts(collector)
   const extensions = createExtensions(collector, accounts)
   const marketplace = createMarketplace()
-  const ops = createOps()
+  const godeye = createGodeye()
+  const understand = createUnderstand()
   const tasks = createTasks({ dir: options.dataDir })
   await collector.init()
   for (let port = options.port; port < options.port + PORT_ATTEMPTS; port++) {
@@ -359,7 +408,7 @@ async function start(options) {
       if (options.open) openBrowser(url, ui)
       return
     }
-    const server = http.createServer(createHandler(collector, timelines, runs, accounts, extensions, marketplace, ops, tasks, port, (text) => ui.log(text, 'error')))
+    const server = http.createServer(createHandler(collector, timelines, runs, accounts, extensions, marketplace, tasks, godeye, understand, port, (text) => ui.log(text, 'error')))
     try {
       await listen(server, port)
     } catch (error) {

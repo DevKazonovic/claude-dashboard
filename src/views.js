@@ -12,7 +12,6 @@ const SORTS = new Set(['lastActive', 'tokens', 'started'])
 const PROJECT_SORTS = new Set(['tokens', 'lastActive', 'conversations', 'name'])
 const PROJECT_ITEMS = 10
 const TOP_LIMIT = 6
-const MAP_OTHERS = 3
 const AGENT_STATUS = { done: 'Done', failed: 'Failed', stopped: 'Stopped', working: 'Working', inactive: 'Inactive', ended: 'Ended' }
 const TOKEN_ROWS = [
   ['cacheRead', 'Cache read'],
@@ -154,7 +153,7 @@ function liveActivity(transcript, now, agentsWorking) {
   return activity(agentsWorking ? `Waiting for ${format.plural(agentsWorking, 'agent', 'agents')}` : 'Waiting for background tasks', '', null, data.turnEndedAt)
 }
 
-function agentDto(agent, main, record, now) {
+function agentDto(agent, main, record, now, owners) {
   const models = modelsOf(agent.state, null)
   const totals = sumModels(models)
   const status = agentStatus(agent, main, record, now)
@@ -162,6 +161,7 @@ function agentDto(agent, main, record, now) {
   const startedAt = agent.state.data.firstTs ? Date.parse(agent.state.data.firstTs) : NaN
   return {
     id: agent.ref.id,
+    parentId: owners.get(agent.meta.toolUseId) || null,
     workflowId: agent.ref.workflowId,
     workflowName: agent.workflowName,
     typeLabel: format.agentTypeLabel(agent.meta.agentType),
@@ -189,7 +189,9 @@ function describeSession({ record, loaded }, { range, now }) {
   const correctionInRange = correction && (!range || !range.from || (correction.day && correction.day >= range.from && correction.day <= range.to))
   if (correctionInRange) mergeModels(models, correction.models)
   const totals = sumModels(models)
-  const agents = loaded.agents.map((agent) => agentDto(agent, main, record, now)).sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0))
+  const owners = new Map()
+  for (const agent of loaded.agents) for (const call of agent.state.data.agentCalls.keys()) owners.set(call, agent.ref.id)
+  const agents = loaded.agents.map((agent) => agentDto(agent, main, record, now, owners)).sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0))
   const working = agents.filter((agent) => agent.status === 'working')
   const everUsed = (data ? data.seen.size : 0) + loaded.agents.reduce((total, agent) => total + agent.state.data.seen.size, 0) > 0
   const cwd = (record && record.cwd) || (data && data.cwd) || ''
@@ -308,8 +310,8 @@ function rangeDto(range) {
   return { key: range.key, label: range.label, description: range.description, from: range.from, to: range.to }
 }
 
-function byActivity(a, b) {
-  return (b.status === 'working') - (a.status === 'working') || b.lastActiveAt - a.lastActiveAt
+function byStart(a, b) {
+  return (a.startedAt || Infinity) - (b.startedAt || Infinity) || a.id.localeCompare(b.id)
 }
 
 function agentNode(agent) {
@@ -327,58 +329,48 @@ function agentNode(agent) {
     lastActiveAt: agent.lastActiveAt || 0,
     startedAt: agent.startedAt,
     lastActiveLabel: agent.lastActiveLabel,
+    children: [],
   }
 }
 
 function mapNodes(agents, now) {
-  const nodes = []
+  const nodes = new Map(agents.map((agent) => [agent.id, agentNode(agent)]))
+  const roots = []
   const workflows = new Map()
-  for (const agent of agents) {
+  for (const agent of [...agents].sort(byStart)) {
+    const node = nodes.get(agent.id)
+    const parent = nodes.get(agent.parentId)
+    if (parent) {
+      parent.children.push(node)
+      continue
+    }
     if (!agent.workflowId) {
-      nodes.push(agentNode(agent))
+      roots.push(node)
       continue
     }
     if (!workflows.has(agent.workflowId)) {
-      const node = { kind: 'workflow', key: agent.workflowId, name: agent.workflowName || agent.workflowId, agents: [], tokens: 0, lastActiveAt: 0 }
-      workflows.set(agent.workflowId, node)
-      nodes.push(node)
+      const workflow = { kind: 'workflow', key: agent.workflowId, name: agent.workflowName || agent.workflowId, children: [], tokens: 0, lastActiveAt: 0 }
+      workflows.set(agent.workflowId, workflow)
+      roots.push(workflow)
     }
-    const node = workflows.get(agent.workflowId)
-    node.agents.push(agentNode(agent))
-    node.tokens += agent.totalTokens
-    node.lastActiveAt = Math.max(node.lastActiveAt, agent.lastActiveAt || 0)
+    const workflow = workflows.get(agent.workflowId)
+    workflow.children.push(node)
+    workflow.tokens += agent.totalTokens
+    workflow.lastActiveAt = Math.max(workflow.lastActiveAt, agent.lastActiveAt || 0)
   }
   for (const node of workflows.values()) {
-    const count = (status) => node.agents.filter((agent) => agent.status === status).length
+    const count = (status) => node.children.filter((agent) => agent.status === status).length
     const done = count('done')
     const working = count('working')
     const failed = count('failed')
-    node.status = working ? 'working' : failed ? 'failed' : done === node.agents.length ? 'done' : 'inactive'
+    node.status = working ? 'working' : failed ? 'failed' : done === node.children.length ? 'done' : 'inactive'
     node.stateLabel = AGENT_STATUS[node.status]
-    node.progress = done / node.agents.length
-    node.statusLabel = [`${format.count(done)} of ${format.count(node.agents.length)} done`, working ? `${format.count(working)} working` : null, failed ? `${format.count(failed)} failed` : null].filter(Boolean).join(', ')
+    node.progress = done / node.children.length
+    node.statusLabel = [`${format.count(done)} of ${format.count(node.children.length)} done`, working ? `${format.count(working)} working` : null, failed ? `${format.count(failed)} failed` : null].filter(Boolean).join(', ')
     node.tokensLabel = `${format.tokens(node.tokens)} tokens`
     node.lastActiveLabel = node.lastActiveAt ? format.capitalize(format.ago(node.lastActiveAt, now)) : 'Unknown'
-    node.agents.sort(byActivity)
   }
-  nodes.sort(byActivity)
-  const others = nodes.filter((node) => node.status !== 'working')
-  const limit = others.length > MAP_OTHERS + 1 ? MAP_OTHERS : others.length
-  const shown = [...nodes.filter((node) => node.status === 'working'), ...others.slice(0, limit)]
-  const rest = others.slice(limit)
-  if (rest.length) {
-    const counts = new Map()
-    for (const node of rest) counts.set(node.status, (counts.get(node.status) || 0) + 1)
-    shown.push({
-      kind: 'more',
-      key: 'more',
-      status: 'more',
-      label: `${format.count(rest.length)} more`,
-      statusLabel: [...counts].map(([status, total]) => `${format.count(total)} ${AGENT_STATUS[status].toLowerCase()}`).join(', '),
-      nodes: rest,
-    })
-  }
-  return shown
+  return roots
 }
 
 async function buildLive(collector, accounts) {

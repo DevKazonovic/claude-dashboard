@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/path/to/claude-dashboard/src/understand/hooks/post-tool-use-auto-update.mjs\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/path/to/claude-dashboard/src/understand/hooks/session-start-stale-check.mjs\""
+          }
+        ]
+      }
+    ]
+  }
+}
